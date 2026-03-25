@@ -272,6 +272,28 @@ export async function getPayerTypes() {
     listsStore.payer_types = processingArray(response);
 }
 
+// Ограничения допустимых грузов/групп по узлу/станции.
+// backend: GET /api/cargo-constraints?stationId=...|knotKey=...
+export async function getCargoConstraints({ stationId, knotKey } = {}) {
+    const params = {};
+    if (stationId) params.stationId = stationId;
+    if (knotKey) params.knotKey = knotKey;
+
+    try {
+        const response = await apiClient.get(`${baseUrl}/api/cargo-constraints`, { params });
+        return response.data;
+    } catch (e) {
+        console.error('Failed to load cargo constraints:', e);
+        return {
+            knotKey: null,
+            hasGroupRestrictions: false,
+            hasCargoRestrictions: false,
+            cargoGroupIds: [],
+            cargoIds: []
+        };
+    }
+}
+
 export async function getSendTypes() {
     let request = {
         "act": "read",

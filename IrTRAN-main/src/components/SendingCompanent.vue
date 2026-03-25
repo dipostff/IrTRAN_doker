@@ -1,7 +1,7 @@
 <script>
 import { useMainStore, useListsStore } from "@/stores/main";
 import { Sending } from "@/models/sending";
-import { saveSending } from "@/helpers/API";
+import { saveSending, getCargoConstraints } from "@/helpers/API";
 export default {
     props: {
         object: {
@@ -18,9 +18,53 @@ export default {
             listsStore: {},
             mainStore: {},
             sending: {},
+            cargoConstraints: {
+                hasCargoRestrictions: false,
+                cargoIds: []
+            },
         };
     },
     methods: {
+        async fetchCargoConstraints() {
+            try {
+                const stationId =
+                    this.object?.id_station_departure ||
+                    this.sending?.id_station_departure ||
+                    this.sending?.id_station_destination ||
+                    null;
+
+                if (!stationId) {
+                    this.cargoConstraints = {
+                        hasCargoRestrictions: false,
+                        cargoIds: []
+                    };
+                    return;
+                }
+
+                const c = await getCargoConstraints({ stationId });
+
+                const has = !!c?.hasCargoRestrictions;
+                const ids = Array.isArray(c?.cargoIds) ? c.cargoIds : [];
+
+                this.cargoConstraints = {
+                    hasCargoRestrictions: has,
+                    cargoIds: ids
+                };
+
+                if (has && this.sending?.id_cargo != null) {
+                    const allowed = new Set(ids.map((x) => Number(x)));
+                    if (!allowed.has(Number(this.sending.id_cargo))) {
+                        this.sending.id_cargo = null;
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to fetch cargo constraints:", e);
+                this.cargoConstraints = {
+                    hasCargoRestrictions: false,
+                    cargoIds: []
+                };
+            }
+        },
         async saveDocument() {
             let saveDoc = await saveSending(this.sending);
             this.$emit("saveSending", saveDoc.id);
@@ -40,6 +84,16 @@ export default {
         watchedComputed() {
             return Object.assign({}, this.sending);
         },
+        filteredCargos() {
+            const cargos = this.listsStore?.cargos || {};
+            if (!this.cargoConstraints?.hasCargoRestrictions) return cargos;
+            const allowed = new Set((this.cargoConstraints.cargoIds || []).map((x) => Number(x)));
+            const out = {};
+            for (const [id, item] of Object.entries(cargos)) {
+                if (allowed.has(Number(id))) out[id] = item;
+            }
+            return out;
+        }
     },
     watch: {
         watchedComputed: {
@@ -54,6 +108,12 @@ export default {
                 }
             },
         },
+        "object.id_station_departure": {
+            immediate: true,
+            handler() {
+                this.fetchCargoConstraints();
+            }
+        }
     },
 };
 </script>
@@ -76,7 +136,7 @@ export default {
                     </div>
 
                     <div class="row mb-1">
-                        <select-with-search title="Груз" :req="true" :values="listsStore.cargos" valueKey="id" name="name" v-model="sending.id_cargo" modalName="SendingCargo" :fixWidth="false" :fields="{ 'Код груза ЕТСНГ': 'code_ETSNG', 'Наименование груза': 'name', 'Краткое наименование': 'short_name', 'Номер группы груза': 'number_group' }" />
+                        <select-with-search title="Груз" :req="true" :values="filteredCargos" valueKey="id" name="name" v-model="sending.id_cargo" modalName="SendingCargo" :fixWidth="false" :fields="{ 'Код груза ЕТСНГ': 'code_ETSNG', 'Наименование груза': 'name', 'Краткое наименование': 'short_name', 'Номер группы груза': 'number_group' }" />
                         <disable-simple-input title="Код груза" :dis="true" :value="listsStore.cargos[sending.id_cargo]?.code_ETSNG" :fixWidth="false" styleInput="width: 120px" />
                     </div>
 

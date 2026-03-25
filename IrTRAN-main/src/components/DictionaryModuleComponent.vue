@@ -13,6 +13,8 @@ const meta = ref({ columns: {}, fieldLabels: {}, fieldOrder: null });
 const rows = ref([]);
 const loading = ref(false);
 const error = ref('');
+const importInfo = ref('');
+const selectedImportFile = ref(null);
 
 const apiBase = computed(
   () => `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}`
@@ -67,6 +69,86 @@ async function loadDictionary(key) {
   } catch (e) {
     console.error('Error loading dictionary:', e);
     error.value = 'Не удалось загрузить данные выбранного справочника.';
+  } finally {
+    loading.value = false;
+  }
+}
+
+function onImportFileChange(event) {
+  const [file] = (event?.target?.files || []);
+  selectedImportFile.value = file || null;
+}
+
+async function importFromFile() {
+  const key = selectedForUpdate.value;
+  if (!key) return;
+  if (!selectedImportFile.value) {
+    error.value = 'Выберите файл для импорта (.json или .xlsx).';
+    return;
+  }
+
+  const fileName = selectedImportFile.value.name || '';
+  const lower = fileName.toLowerCase();
+  if (!lower.endsWith('.json') && !lower.endsWith('.xlsx')) {
+    error.value = 'Поддерживаются только файлы формата .json и .xlsx.';
+    return;
+  }
+
+  try {
+    loading.value = true;
+    error.value = '';
+    importInfo.value = '';
+    const formData = new FormData();
+    formData.append('file', selectedImportFile.value);
+    const { data } = await axios.post(
+      `${apiBase.value}/api/dictionaries/${key}/import`,
+      formData,
+      {
+        headers: {
+          ...getAuthHeaders()
+        }
+      }
+    );
+    const stats = data?.stats || {};
+    importInfo.value = `Импорт завершён: всего ${stats.total || 0}, добавлено ${
+      stats.inserted || 0
+    }, обновлено ${stats.updated || 0}, пропущено ${stats.skipped || 0}.`;
+    await loadDictionary(key);
+    selectedImportFile.value = null;
+  } catch (e) {
+    console.error('Error importing dictionary file:', e);
+    error.value =
+      e?.response?.data?.message || 'Не удалось импортировать данные из файла.';
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function downloadTemplate(format) {
+  const key = selectedForUpdate.value;
+  if (!key) return;
+  try {
+    loading.value = true;
+    error.value = '';
+    const ext = format === 'xlsx' ? 'xlsx' : 'json';
+    const response = await axios.get(`${apiBase.value}/api/dictionaries/${key}/template`, {
+      headers: getAuthHeaders(),
+      params: { format: ext },
+      responseType: 'blob'
+    });
+
+    const blob = new Blob([response.data], { type: response.headers['content-type'] });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `dictionary-template-${key}.${ext}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error('Error downloading dictionary template:', e);
+    error.value = 'Не удалось скачать шаблон файла.';
   } finally {
     loading.value = false;
   }
@@ -291,6 +373,95 @@ onMounted(() => {
               {{ d.label }}
             </option>
           </select>
+        </div>
+      </div>
+
+      <div v-if="meta.importGuide" class="alert alert-info">
+        <div class="fw-semibold mb-2">Инструкция по загрузке</div>
+        <div class="mb-1">Поддерживаемые форматы: {{ meta.importGuide.acceptedFormats?.join(', ') }}</div>
+        <div class="mb-1">{{ meta.importGuide.requiredLanguageHint }}</div>
+        <div class="mb-1">{{ meta.importGuide.matchingRules }}</div>
+        <div v-if="meta.importGuide.requiredFields?.length" class="mb-1">
+          Обязательные поля: <strong>{{ meta.importGuide.requiredFields.join(', ') }}</strong>
+        </div>
+        <div v-if="meta.importGuide.xlsxTemplate?.headerRow?.length" class="mb-1">
+          Шаблон XLSX (строка заголовков):
+          <code>{{ meta.importGuide.xlsxTemplate.headerRow.join(', ') }}</code>
+        </div>
+        <div v-if="meta.importGuide.jsonTemplate?.example" class="mb-1">
+          Шаблон JSON (пример объекта):
+          <code>{{ meta.importGuide.jsonTemplate.example }}</code>
+        </div>
+        <ul class="mb-0">
+          <li v-for="tip in meta.importGuide.uploadTips || []" :key="tip">{{ tip }}</li>
+        </ul>
+        <div v-if="meta.importGuide.exportTips?.length" class="mt-2 fw-semibold">
+          Инструкция для подготовки/выгрузки файла
+        </div>
+        <ul v-if="meta.importGuide.exportTips?.length" class="mb-0">
+          <li v-for="tip in meta.importGuide.exportTips" :key="`exp-${tip}`">{{ tip }}</li>
+        </ul>
+        <div v-if="meta.importGuide.dictionaryNotes?.length" class="mt-2 fw-semibold">
+          Примечания для выбранного справочника
+        </div>
+        <ul v-if="meta.importGuide.dictionaryNotes?.length" class="mb-0">
+          <li v-for="note in meta.importGuide.dictionaryNotes" :key="`note-${note}`">
+            {{ note }}
+          </li>
+        </ul>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <h6 class="card-title">Загрузить из файла</h6>
+          <p class="text-muted mb-2">
+            Загрузите .json или .xlsx файл, чтобы автоматически добавить/обновить записи
+            выбранного справочника.
+          </p>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-6">
+              <label class="form-label">Файл</label>
+              <input
+                type="file"
+                class="form-control"
+                accept=".json,.xlsx"
+                @change="onImportFileChange"
+              />
+            </div>
+            <div class="col-md-3">
+              <button
+                type="button"
+                class="btn btn-primary w-100"
+                :disabled="loading || !selectedImportFile"
+                @click="importFromFile"
+              >
+                Загрузить из файла
+              </button>
+            </div>
+            <div class="col-md-3">
+              <div class="d-grid gap-2">
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary"
+                  :disabled="loading"
+                  @click="downloadTemplate('json')"
+                >
+                  Скачать шаблон JSON
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary"
+                  :disabled="loading"
+                  @click="downloadTemplate('xlsx')"
+                >
+                  Скачать шаблон XLSX
+                </button>
+              </div>
+            </div>
+          </div>
+          <div v-if="importInfo" class="alert alert-success mt-3 mb-0">
+            {{ importInfo }}
+          </div>
         </div>
       </div>
 

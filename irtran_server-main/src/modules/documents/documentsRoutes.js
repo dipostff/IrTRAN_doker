@@ -26,6 +26,16 @@ const DOCUMENT_TYPE_LABELS = {
   cumulative_statement: 'Накопительная ведомость'
 };
 
+function toWinAnsiSafeText(value) {
+  // StandardFonts.Helvetica в pdf-lib поддерживает WinAnsi и падает на кириллице.
+  // Чтобы не ронять скачивание PDF, заменяем неподдерживаемые символы.
+  return String(value ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/[^\x20-\x7E]/g, '?')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function getUserId(req) {
   const user = req.user || {};
   return user.sub || null;
@@ -107,12 +117,12 @@ async function buildPdfFromData(title, fields) {
   const { height } = page.getSize();
   let y = height - 50;
 
-  page.drawText(title, { x: 50, y, size: 16, font, color: rgb(0, 0, 0) });
+  page.drawText(toWinAnsiSafeText(title), { x: 50, y, size: 16, font, color: rgb(0, 0, 0) });
   y -= 28;
 
   const lineHeight = 14;
   for (const [label, value] of Object.entries(fields)) {
-    const text = `${String(label)}: ${value != null ? String(value) : '—'}`.slice(0, 80);
+    const text = toWinAnsiSafeText(`${String(label)}: ${value != null ? String(value) : '-'}`).slice(0, 80);
     page.drawText(text, { x: 50, y, size: 10, font, color: rgb(0, 0, 0) });
     y -= lineHeight;
   }

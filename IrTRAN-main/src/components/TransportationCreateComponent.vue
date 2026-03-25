@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref, watch, computed } from "vue";
-import { saveTransporation, deleteTransporation, getTransportation } from "@/helpers/API";
+import { saveTransporation, deleteTransporation, getTransportation, getCargoConstraints } from "@/helpers/API";
 import { updateTitle } from "@/helpers/headerHelper";
 import router from "@/router";
 import { useRoute } from "vue-router";
@@ -14,6 +14,23 @@ const route = useRoute();
 const document = ref(Transporation.getDefaultDocument());
 const selectedPayerId = ref(null);
 const saveError = ref(null);
+
+// Допустимые группы грузов по узлу/станции (когда в БД настроены ограничения)
+const cargoConstraints = ref({
+  hasGroupRestrictions: false,
+  cargoGroupIds: []
+});
+
+const filteredCargoGroups = computed(() => {
+  const groups = listsStore.cargo_groups || {};
+  if (!cargoConstraints.value?.hasGroupRestrictions) return groups;
+  const allowed = new Set((cargoConstraints.value.cargoGroupIds || []).map((x) => Number(x)));
+  const out = {};
+  for (const [id, item] of Object.entries(groups)) {
+    if (allowed.has(Number(id))) out[id] = item;
+  }
+  return out;
+});
 
 const watchedComputed = computed(() => Object.assign({}, document.value));
 
@@ -167,6 +184,39 @@ onMounted(async () => {
 });
 
 watch(
+  () => document.value?.id_station_departure,
+  async (newStationId) => {
+    try {
+      if (!newStationId) {
+        cargoConstraints.value = {
+          hasGroupRestrictions: false,
+          cargoGroupIds: []
+        };
+        return;
+      }
+      const c = await getCargoConstraints({ stationId: newStationId });
+      cargoConstraints.value = {
+        hasGroupRestrictions: !!c?.hasGroupRestrictions,
+        cargoGroupIds: Array.isArray(c?.cargoGroupIds) ? c.cargoGroupIds : []
+      };
+
+      if (
+        cargoConstraints.value.hasGroupRestrictions &&
+        document.value?.id_cargo_group != null
+      ) {
+        const allowed = new Set(cargoConstraints.value.cargoGroupIds);
+        if (!allowed.has(Number(document.value.id_cargo_group))) {
+          document.value.id_cargo_group = null;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to sync cargo constraints:', e);
+    }
+  },
+  { immediate: true }
+);
+
+watch(
     watchedComputed,
     async (newVal, oldVal) => {
         Transporation.checkAutoFilledFields(newVal, oldVal);
@@ -294,7 +344,7 @@ watch(
                 <!-- ------------------------------------------------------ -->
 
                 <div class="row mb-1">
-                    <select-with-search title="Группа груза" :req="true" :values="listsStore.cargo_groups" valueKey="id" name="name" v-model="document.id_cargo_group" modalName="CargoGroup" :fields="{ 'Код группы груза': 'code', 'Наименование группы груза': 'name', 'Минимальная нагрузка': 'min_load', 'Максимальная нагрузка': 'max_load' }" />
+                    <select-with-search title="Группа груза" :req="true" :values="filteredCargoGroups" valueKey="id" name="name" v-model="document.id_cargo_group" modalName="CargoGroup" :fields="{ 'Код группы груза': 'code', 'Наименование группы груза': 'name', 'Минимальная нагрузка': 'min_load', 'Максимальная нагрузка': 'max_load' }" />
                     <disable-simple-input title="Код группы груза" :dis="true" :value="listsStore.cargo_groups[document.id_cargo_group]?.code" :fixWidth="false" styleInput="width: 100px" />
                     <disable-simple-input title="Мин. норма загр. т" :dis="true" :value="listsStore.cargo_groups[document.id_cargo_group]?.min_load" :fixWidth="false" styleInput="width: 100px" />
                     <disable-simple-input title="Макс. норма загр. т" :dis="true" :value="listsStore.cargo_groups[document.id_cargo_group]?.max_load" :fixWidth="false" styleInput="width: 100px" />

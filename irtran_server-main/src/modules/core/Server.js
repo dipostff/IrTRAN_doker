@@ -11,6 +11,7 @@ const WorkerController = require('./../worker/WorkerController');
 const { registerAuthRoutes } = require('./../auth/authRoutes');
 const { registerReferenceRoutes } = require('./../content/referenceRoutes');
 const { registerDictionaryRoutes } = require('./../dictionaries/dictionaryRoutes');
+const { registerCargoConstraintsRoutes } = require('./../dictionaries/cargoConstraintsRoutes');
 const { registerScenarioRoutes } = require('./../content/scenarioRoutes');
 const { registerTestRoutes } = require('./../tests/testRoutes');
 const { registerAdminRoutes } = require('./../admin/adminRoutes');
@@ -120,6 +121,7 @@ class Server {
     registerAuthRoutes(this.app);
     registerReferenceRoutes(this.app);
     registerDictionaryRoutes(this.app);
+    registerCargoConstraintsRoutes(this.app);
     registerScenarioRoutes(this.app);
     registerTestRoutes(this.app);
     registerAdminRoutes(this.app);
