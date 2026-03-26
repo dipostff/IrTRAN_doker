@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import axios from 'axios';
 import { getToken } from '@/helpers/keycloak';
 
@@ -9,9 +9,14 @@ const loading = ref(false);
 const items = ref([]);
 const total = ref(0);
 const query = ref('');
+const queryId = ref('');
 const page = ref(1);
 const pageSize = ref(20);
 const listError = ref('');
+
+const lastSearchMode = ref(null); // 'id' | 'text' | null
+let autoSearchTimer = null;
+const isAutoClearing = ref(false);
 
 const showForm = ref(false);
 const editId = ref(null);
@@ -43,6 +48,64 @@ onMounted(() => {
   loadData();
 });
 
+watch(
+  () => queryId.value,
+  (v) => {
+    if (String(v || '').trim()) {
+      if (query.value) {
+        isAutoClearing.value = true;
+        query.value = '';
+        isAutoClearing.value = false;
+      }
+      lastSearchMode.value = 'id';
+      page.value = 1;
+
+      if (autoSearchTimer) clearTimeout(autoSearchTimer);
+      autoSearchTimer = setTimeout(() => {
+        const n = parseInt(queryId.value, 10);
+        if (n && !Number.isNaN(n)) loadData();
+      }, 300);
+      return;
+    }
+
+    if (autoSearchTimer) clearTimeout(autoSearchTimer);
+  }
+);
+
+watch(
+  () => query.value,
+  (v) => {
+    if (String(v || '').trim()) {
+      if (isAutoClearing.value) return;
+      if (queryId.value) {
+        isAutoClearing.value = true;
+        queryId.value = '';
+        isAutoClearing.value = false;
+      }
+      lastSearchMode.value = 'text';
+      page.value = 1;
+    }
+  }
+);
+
+const idNumber = computed(() => {
+  const n = queryId.value ? parseInt(queryId.value, 10) : null;
+  return n && !Number.isNaN(n) ? n : null;
+});
+
+const searchStatus = computed(() => {
+  if (loading.value) return '';
+  if (listError.value) return '';
+  if (lastSearchMode.value === 'id' && idNumber.value) {
+    if (items.value.length === 0) return `По ID ${idNumber.value} ничего не найдено.`;
+    return `Найден вопрос по ID ${idNumber.value}.`;
+  }
+  if (lastSearchMode.value === 'text' && (query.value || '').trim()) {
+    return `Найдено: ${total.value} (страница ${page.value}).`;
+  }
+  return '';
+});
+
 function getAuthHeaders() {
   const token = getToken();
   return { Authorization: token ? `Bearer ${token}` : '' };
@@ -52,8 +115,14 @@ async function loadData() {
   try {
     loading.value = true;
     listError.value = '';
+    const id = queryId.value ? parseInt(queryId.value, 10) : null;
     const res = await axios.get(`${apiBase}/api/questions`, {
-      params: { q: query.value || '', limit: pageSize.value, offset: (page.value - 1) * pageSize.value },
+      params: {
+        id: id && !Number.isNaN(id) ? id : undefined,
+        q: query.value || '',
+        limit: pageSize.value,
+        offset: (page.value - 1) * pageSize.value
+      },
       headers: getAuthHeaders()
     });
     items.value = res.data.items || [];
@@ -216,11 +285,16 @@ function typeLabel(type) {
           <button class="btn btn-primary" type="button" @click="loadData">Найти</button>
         </div>
       </div>
+      <div class="col-md-2">
+        <label class="form-label">Поиск по ID</label>
+        <input v-model="queryId" type="number" min="1" class="form-control" placeholder="Напр. 123" @keyup.enter="loadData" />
+      </div>
       <div class="col-md-4 d-flex align-items-end">
         <button class="btn btn-success" type="button" @click="openAdd">Добавить вопрос</button>
       </div>
     </div>
 
+    <div v-if="searchStatus" class="alert alert-info py-2">{{ searchStatus }}</div>
     <div v-if="listError" class="alert alert-danger">{{ listError }}</div>
     <div v-if="loading" class="mb-3">Загрузка...</div>
 

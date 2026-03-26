@@ -1,6 +1,12 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { isAuthenticated, initKeycloak } from "@/helpers/keycloak";
 
+// Initialize Keycloak once; router guard can await this without re-triggering init per navigation.
+const keycloakReady = initKeycloak().catch((e) => {
+    console.error('Keycloak initialization error (router module):', e);
+    return false;
+});
+
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
     routes: [
@@ -293,15 +299,8 @@ const PAGE_TITLE = {
 
 // Navigation guard to protect routes
 router.beforeEach(async (to, from, next) => {
-    // Wait for Keycloak initialization (it's already initialized in main.js, but we wait for it)
-    // Use try-catch but don't block navigation on error
-    let authenticated = false;
-    try {
-        authenticated = await initKeycloak();
-    } catch (error) {
-        // If initialization fails, still allow navigation but log the error
-        console.error('Keycloak initialization error in router:', error);
-    }
+    // Wait for Keycloak initialization without re-triggering it.
+    const authenticated = await keycloakReady;
 
     // Allow access to authorization page
     if (to.name === 'authotrization') {

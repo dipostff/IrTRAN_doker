@@ -34,6 +34,8 @@ function getAdminConfig() {
 
 const adminConfig = getAdminConfig();
 
+const GROUP_ROOT_PATH = ['IrTRAN', 'Teachers'];
+
 /**
  * Получить access token администратора Keycloak через password grant.
  */
@@ -51,6 +53,14 @@ async function getAdminAccessToken() {
   });
 
   return response.data.access_token;
+}
+
+function authHeaders(token) {
+  return {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  };
 }
 
 async function getRoleRepresentation(roleName, token) {
@@ -132,6 +142,171 @@ async function listUsers() {
   return res.data || [];
 }
 
+async function listTopLevelGroups() {
+  const token = await getAdminAccessToken();
+  const res = await axios.get(`${adminConfig.adminApiBaseUrl}/groups`, authHeaders(token));
+  return res.data || [];
+}
+
+async function getGroup(groupId) {
+  const token = await getAdminAccessToken();
+  const res = await axios.get(
+    `${adminConfig.adminApiBaseUrl}/groups/${encodeURIComponent(groupId)}`,
+    authHeaders(token)
+  );
+  return res.data;
+}
+
+async function listGroupChildren(groupId) {
+  const token = await getAdminAccessToken();
+  const res = await axios.get(
+    `${adminConfig.adminApiBaseUrl}/groups/${encodeURIComponent(groupId)}/children`,
+    authHeaders(token)
+  );
+  return res.data || [];
+}
+
+async function createTopLevelGroup(name) {
+  const token = await getAdminAccessToken();
+  const res = await axios.post(
+    `${adminConfig.adminApiBaseUrl}/groups`,
+    { name },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+  const location = res.headers?.location || '';
+  const id = location.split('/').pop() || null;
+  return id ? getGroup(id) : null;
+}
+
+async function createChildGroup(parentGroupId, name) {
+  const token = await getAdminAccessToken();
+  const res = await axios.post(
+    `${adminConfig.adminApiBaseUrl}/groups/${encodeURIComponent(parentGroupId)}/children`,
+    { name },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+  const location = res.headers?.location || '';
+  const id = location.split('/').pop() || null;
+  return id ? getGroup(id) : null;
+}
+
+async function ensureGroupPath(pathSegments) {
+  if (!Array.isArray(pathSegments) || pathSegments.length === 0) {
+    throw new Error('group_path_required');
+  }
+
+  // 1) top-level
+  let current = null;
+  const topName = pathSegments[0];
+  const topGroups = await listTopLevelGroups();
+  current = topGroups.find((g) => (g.name || '') === topName) || null;
+  if (!current) {
+    current = await createTopLevelGroup(topName);
+  }
+
+  // 2) nested
+  for (let i = 1; i < pathSegments.length; i++) {
+    const name = pathSegments[i];
+    // eslint-disable-next-line no-await-in-loop
+    const children = await listGroupChildren(current.id);
+    let next = children.find((g) => (g.name || '') === name) || null;
+    if (!next) {
+      // eslint-disable-next-line no-await-in-loop
+      next = await createChildGroup(current.id, name);
+    }
+    current = next;
+  }
+
+  return current;
+}
+
+async function listTeacherOwnedGroups(teacherUserId) {
+  const ownerPath = [...GROUP_ROOT_PATH, teacherUserId, 'Groups'];
+  const groupsFolder = await ensureGroupPath(ownerPath);
+  const children = await listGroupChildren(groupsFolder.id);
+  return children.map((g) => ({
+    id: g.id,
+    name: g.name,
+    path: g.path
+  }));
+}
+
+async function createTeacherOwnedGroup(teacherUserId, groupName) {
+  const ownerPath = [...GROUP_ROOT_PATH, teacherUserId, 'Groups'];
+  const groupsFolder = await ensureGroupPath(ownerPath);
+  const existing = (await listGroupChildren(groupsFolder.id)).find((g) => g.name === groupName);
+  if (existing) return { id: existing.id, name: existing.name, path: existing.path };
+  const created = await createChildGroup(groupsFolder.id, groupName);
+  return created ? { id: created.id, name: created.name, path: created.path } : null;
+}
+
+async function listAllTeacherGroups() {
+  const teachersRoot = await ensureGroupPath([...GROUP_ROOT_PATH]);
+  const teacherNodes = await listGroupChildren(teachersRoot.id); // <teacherUserId> groups
+
+  const all = [];
+  for (const t of teacherNodes) {
+    // eslint-disable-next-line no-await-in-loop
+    const groupsFolder = (await listGroupChildren(t.id)).find((c) => c.name === 'Groups') || null;
+    if (!groupsFolder) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const groups = await listGroupChildren(groupsFolder.id);
+    groups.forEach((g) =>
+      all.push({
+        id: g.id,
+        name: g.name,
+        path: g.path,
+        ownerTeacherId: t.name
+      })
+    );
+  }
+  return all;
+}
+
+async function listGroupMembers(groupId) {
+  const token = await getAdminAccessToken();
+  const res = await axios.get(
+    `${adminConfig.adminApiBaseUrl}/groups/${encodeURIComponent(groupId)}/members`,
+    authHeaders(token)
+  );
+  return res.data || [];
+}
+
+async function addUserToGroup(userId, groupId) {
+  const token = await getAdminAccessToken();
+  await axios.put(
+    `${adminConfig.adminApiBaseUrl}/users/${encodeURIComponent(userId)}/groups/${encodeURIComponent(groupId)}`,
+    {},
+    authHeaders(token)
+  );
+}
+
+async function removeUserFromGroup(userId, groupId) {
+  const token = await getAdminAccessToken();
+  await axios.delete(
+    `${adminConfig.adminApiBaseUrl}/users/${encodeURIComponent(userId)}/groups/${encodeURIComponent(groupId)}`,
+    authHeaders(token)
+  );
+}
+
+async function deleteGroup(groupId) {
+  const token = await getAdminAccessToken();
+  await axios.delete(
+    `${adminConfig.adminApiBaseUrl}/groups/${encodeURIComponent(groupId)}`,
+    authHeaders(token)
+  );
+}
+
 /**
  * Получить текущие realm‑роли пользователя.
  */
@@ -156,7 +331,16 @@ module.exports = {
   addRealmRolesToUser,
   removeRealmRolesFromUser,
   listUsers,
-  getUserRealmRoles
+  getUserRealmRoles,
+  // groups (for teacher groups feature)
+  listTeacherOwnedGroups,
+  createTeacherOwnedGroup,
+  listAllTeacherGroups,
+  listGroupMembers,
+  addUserToGroup,
+  removeUserFromGroup,
+  deleteGroup,
+  ensureGroupPath
 };
 //-----------Экспортируемые модули-----------//
 

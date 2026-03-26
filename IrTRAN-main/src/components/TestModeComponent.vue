@@ -21,6 +21,7 @@ const testsError = ref("");
 const currentPassPercent = ref(null);
 const currentMaxAttempts = ref(null);
 const currentUserAttemptCount = ref(0);
+const currentAttemptId = ref(null);
 const lastPercent = ref(null);
 const lastEarnedPoints = ref(null);
 const lastMaxPoints = ref(null);
@@ -72,20 +73,32 @@ async function loadTests() {
     loadingTests.value = true;
     testsError.value = "";
     const token = getToken();
-    const response = await axios.get(
-      `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/api/tests`,
-      {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-      }
-    );
+    const apiBase = import.meta.env.VITE_API_URL || "http://localhost:3000";
+    const [testsResp, summaryResp] = await Promise.all([
+      axios.get(`${apiBase}/api/tests`, {
+        headers: { Authorization: token ? `Bearer ${token}` : "" },
+      }),
+      axios.get(`${apiBase}/api/tests/attempts/summary`, {
+        headers: { Authorization: token ? `Bearer ${token}` : "" },
+      }),
+    ]);
+
+    const attemptsByTestId = summaryResp.data?.attemptsByTestId || {};
     tests.value =
-      (response.data || []).map((t) => ({
-        id: t.id,
-        name: t.title,
-        description: t.description,
-      })) || [];
+      (testsResp.data || []).map((t) => {
+        const used = Number(attemptsByTestId?.[String(t.id)] || 0);
+        const maxAttempts = t.max_attempts ?? null;
+        const limited = typeof maxAttempts === "number" && maxAttempts > 0;
+        const remaining = limited ? Math.max(0, maxAttempts - used) : null;
+        return {
+          id: t.id,
+          name: t.title,
+          description: t.description,
+          maxAttempts,
+          usedAttempts: used,
+          remainingAttempts: remaining,
+        };
+      }) || [];
   } catch (error) {
     console.error("Error loading tests:", error);
     testsError.value = "Не удалось загрузить список тестов.";
@@ -97,12 +110,19 @@ async function loadTests() {
 async function startTest(id) {
   const test = tests.value.find((t) => t.id === id);
   if (!test) return;
+  const limited =
+    typeof test.maxAttempts === "number" && test.maxAttempts > 0;
+  if (limited && Number(test.remainingAttempts ?? 0) <= 0) {
+    testsError.value = "Для этого теста у вас больше нет попыток.";
+    return;
+  }
 
   try {
     activeTestId.value = id;
     showBackButton.value = false;
     wrongAnswersJournal.value = [];
     surveyModel.value = null;
+    currentAttemptId.value = null;
 
     updateTitle(`Тренажер ЭТРАН - Тест: ${test.name}`);
 
@@ -121,13 +141,36 @@ async function startTest(id) {
     currentMaxAttempts.value = data.maxAttempts ?? null;
     currentUserAttemptCount.value = data.userAttemptCount ?? 0;
 
-    if (
-      currentMaxAttempts.value &&
-      currentMaxAttempts.value > 0 &&
-      currentUserAttemptCount.value >= currentMaxAttempts.value
-    ) {
-      testsError.value =
+    // Списываем попытку при открытии теста
+    try {
+      const startResp = await axios.post(
+        `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/api/tests/${id}/attempts/start`,
+        {},
+        {
+          headers: {
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        }
+      );
+      currentAttemptId.value = startResp.data?.attemptId ?? null;
+      currentUserAttemptCount.value = startResp.data?.userAttemptCount ?? currentUserAttemptCount.value;
+      const idx = tests.value.findIndex((t) => t.id === id);
+      if (idx >= 0) {
+        const t = tests.value[idx];
+        const used = Number(startResp.data?.userAttemptCount ?? (Number(t.usedAttempts || 0) + 1));
+        const maxAttempts = t.maxAttempts ?? null;
+        const limited = typeof maxAttempts === "number" && maxAttempts > 0;
+        tests.value[idx] = {
+          ...t,
+          usedAttempts: used,
+          remainingAttempts: limited ? Math.max(0, maxAttempts - used) : null,
+        };
+      }
+    } catch (e) {
+      const msg =
+        e?.response?.data?.message ||
         "Вы исчерпали максимальное количество попыток для этого теста.";
+      testsError.value = msg;
       activeTestId.value = null;
       return;
     }
@@ -202,20 +245,38 @@ async function startTest(id) {
           lastPassed.value = percentByPoints > 0;
         }
         const token = getToken();
-        await axios.post(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/tests/${id}/attempts`,
-          {
-            correctAnswers: correct,
-            questionCount: total,
-            earnedPoints,
-            maxPoints
-          },
-          {
-            headers: {
-              Authorization: token ? `Bearer ${token}` : ''
+        if (currentAttemptId.value) {
+          await axios.patch(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/tests/${id}/attempts/${currentAttemptId.value}/finish`,
+            {
+              correctAnswers: correct,
+              questionCount: total,
+              earnedPoints,
+              maxPoints
+            },
+            {
+              headers: {
+                Authorization: token ? `Bearer ${token}` : ''
+              }
             }
-          }
-        );
+          );
+        } else {
+          // fallback на старый endpoint (если по какой-то причине start не отработал)
+          await axios.post(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/tests/${id}/attempts`,
+            {
+              correctAnswers: correct,
+              questionCount: total,
+              earnedPoints,
+              maxPoints
+            },
+            {
+              headers: {
+                Authorization: token ? `Bearer ${token}` : ''
+              }
+            }
+          );
+        }
       } catch (e) {
         console.warn('Failed to record test attempt:', e);
       }
@@ -270,6 +331,8 @@ onMounted(() => {
           type="button"
           class="card-square"
           style="border-radius: 10px; border: none"
+          :disabled="test.maxAttempts && test.maxAttempts > 0 && test.remainingAttempts === 0"
+          :class="{ 'card-square-disabled': test.maxAttempts && test.maxAttempts > 0 && test.remainingAttempts === 0 }"
           @click="startTest(test.id)"
         >
           <img
@@ -279,6 +342,31 @@ onMounted(() => {
           />
           <span class="card-text">{{ test.name }}</span>
           <span class="card-desc">{{ test.description }}</span>
+          <span v-if="test.maxAttempts && test.maxAttempts > 0" class="attempts-badges">
+            <span
+              class="attempts-badge"
+              :class="{
+                'attempts-badge-danger': test.remainingAttempts === 0,
+                'attempts-badge-warn': test.remainingAttempts > 0 && test.remainingAttempts <= 2,
+                'attempts-badge-ok': test.remainingAttempts > 2
+              }"
+            >
+              Осталось: {{ test.remainingAttempts }}
+            </span>
+            <span class="attempts-badge attempts-badge-muted">
+              Лимит: {{ test.maxAttempts }}, использовано: {{ test.usedAttempts }}
+            </span>
+          </span>
+          <span v-else class="attempts-badges">
+            <span class="attempts-badge attempts-badge-infinite">Безлимит</span>
+          </span>
+          <span class="card-attempts" v-if="test.maxAttempts && test.maxAttempts > 0">
+            Попытки: {{ test.remainingAttempts }} из {{ test.maxAttempts }}
+            <span class="card-attempts-muted">(использовано: {{ test.usedAttempts }})</span>
+          </span>
+          <span class="card-attempts" v-else>
+            Попытки: без ограничений
+          </span>
         </button>
       </div>
     </div>
@@ -425,6 +513,61 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
+.card-square-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.card-square:disabled:hover {
+  background-color: #efefef;
+}
+
+.attempts-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.attempts-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  background: #e7eefc;
+  color: #1e3a8a;
+}
+
+.attempts-badge-muted {
+  background: #eef2f7;
+  color: #344054;
+  font-weight: 500;
+}
+
+.attempts-badge-danger {
+  background: #fde2e2;
+  color: #b42318;
+}
+
+.attempts-badge-warn {
+  background: #fff4cc;
+  color: #7a5c00;
+}
+
+.attempts-badge-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.attempts-badge-infinite {
+  background: #e0f2fe;
+  color: #075985;
+}
+
 .card-square:hover {
   background-color: #4f85eb;
 }
@@ -445,8 +588,27 @@ onMounted(() => {
   margin-top: 4px;
 }
 
+.card-attempts {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #2d3748;
+}
+
+.card-attempts-muted {
+  color: #667085;
+}
+
 .card-square:hover .card-text,
 .card-square:hover .card-desc {
   color: white;
+}
+
+.card-square:hover .card-attempts,
+.card-square:hover .card-attempts-muted {
+  color: white;
+}
+
+.card-square:hover .attempts-badge {
+  filter: brightness(1.05);
 }
 </style>

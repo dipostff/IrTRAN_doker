@@ -27,6 +27,15 @@ const TestAttempt = sequelize.define(
     percent: {
       type: DataTypes.DECIMAL(5, 2)
     },
+    status: {
+      type: DataTypes.STRING(16)
+    },
+    started_at: {
+      type: DataTypes.DATE
+    },
+    finished_at: {
+      type: DataTypes.DATE
+    },
     created_at: {
       type: DataTypes.DATE
     }

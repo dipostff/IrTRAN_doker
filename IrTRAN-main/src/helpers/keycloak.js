@@ -42,6 +42,10 @@ export function initKeycloak() {
       keycloak.init({
         onLoad: 'check-sso',
         pkceMethod: 'S256',
+        // Avoid full-page redirect loops on refresh by using the silent SSO check page
+        silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
+        // Preserve current route on Keycloak callbacks
+        redirectUri: window.location.href,
         checkLoginIframe: false,
         enableLogging: false
       })

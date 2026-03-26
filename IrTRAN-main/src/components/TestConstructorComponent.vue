@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import axios from 'axios';
 import { getToken } from '@/helpers/keycloak';
 
@@ -8,6 +8,7 @@ const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const step = ref(1);
 const loading = ref(false);
 const bankQuery = ref('');
+const bankQueryId = ref('');
 const bankItems = ref([]);
 const bankTotal = ref(0);
 const variantMode = ref('single_shuffled');
@@ -28,16 +29,182 @@ const maxAttempts = ref(0);
 const createError = ref('');
 const creating = ref(false);
 
+const existingTests = ref([]);
+const loadingExistingTests = ref(false);
+const deleteError = ref('');
+const existingTestIdFilter = ref('');
+
+const editingTestId = ref(null);
+const editLoading = ref(false);
+const editError = ref('');
+
+const lastBankSearchMode = ref(null); // 'id' | 'text' | null
+const lastTestsSearchMode = ref(null); // 'id' | null
+let bankAutoSearchTimer = null;
+let testsAutoSearchTimer = null;
+const isAutoClearing = ref(false);
+
 function getAuthHeaders() {
   const token = getToken();
   return { Authorization: token ? `Bearer ${token}` : '' };
 }
 
+watch(
+  () => bankQueryId.value,
+  (v) => {
+    if (String(v || '').trim()) {
+      if (bankQuery.value) {
+        isAutoClearing.value = true;
+        bankQuery.value = '';
+        isAutoClearing.value = false;
+      }
+      lastBankSearchMode.value = 'id';
+
+      if (bankAutoSearchTimer) clearTimeout(bankAutoSearchTimer);
+      bankAutoSearchTimer = setTimeout(() => {
+        const n = parseInt(bankQueryId.value, 10);
+        if (n && !Number.isNaN(n)) loadBank();
+      }, 300);
+      return;
+    }
+
+    if (bankAutoSearchTimer) clearTimeout(bankAutoSearchTimer);
+  }
+);
+
+watch(
+  () => bankQuery.value,
+  (v) => {
+    if (String(v || '').trim()) {
+      if (isAutoClearing.value) return;
+      if (bankQueryId.value) {
+        isAutoClearing.value = true;
+        bankQueryId.value = '';
+        isAutoClearing.value = false;
+      }
+      lastBankSearchMode.value = 'text';
+    }
+  }
+);
+
+watch(
+  () => existingTestIdFilter.value,
+  (v) => {
+    if (String(v || '').trim()) {
+      lastTestsSearchMode.value = 'id';
+
+      if (testsAutoSearchTimer) clearTimeout(testsAutoSearchTimer);
+      testsAutoSearchTimer = setTimeout(() => {
+        const n = parseInt(existingTestIdFilter.value, 10);
+        if (n && !Number.isNaN(n)) loadExistingTests();
+      }, 300);
+      return;
+    }
+
+    if (testsAutoSearchTimer) clearTimeout(testsAutoSearchTimer);
+  }
+);
+
+const bankIdNumber = computed(() => {
+  const n = bankQueryId.value ? parseInt(bankQueryId.value, 10) : null;
+  return n && !Number.isNaN(n) ? n : null;
+});
+
+const testsIdNumber = computed(() => {
+  const n = existingTestIdFilter.value ? parseInt(existingTestIdFilter.value, 10) : null;
+  return n && !Number.isNaN(n) ? n : null;
+});
+
+const bankSearchStatus = computed(() => {
+  if (loading.value) return '';
+  if (lastBankSearchMode.value === 'id' && bankIdNumber.value) {
+    if (bankItems.value.length === 0) return `По ID ${bankIdNumber.value} ничего не найдено.`;
+    return `Найден вопрос по ID ${bankIdNumber.value}.`;
+  }
+  if (lastBankSearchMode.value === 'text' && (bankQuery.value || '').trim()) {
+    return `Найдено вопросов: ${bankTotal.value}.`;
+  }
+  return '';
+});
+
+const testsSearchStatus = computed(() => {
+  if (loadingExistingTests.value) return '';
+  if (lastTestsSearchMode.value === 'id' && testsIdNumber.value) {
+    if (existingTests.value.length === 0) return `По ID теста ${testsIdNumber.value} ничего не найдено.`;
+    return `Найден тест по ID ${testsIdNumber.value}.`;
+  }
+  return '';
+});
+
+async function loadExistingTests() {
+  try {
+    loadingExistingTests.value = true;
+    deleteError.value = '';
+    const id = existingTestIdFilter.value ? parseInt(existingTestIdFilter.value, 10) : null;
+    const res = await axios.get(`${apiBase}/api/tests`, {
+      params: { id: id && !Number.isNaN(id) ? id : undefined },
+      headers: getAuthHeaders()
+    });
+    existingTests.value = res.data || [];
+  } catch (e) {
+    console.error(e);
+    existingTests.value = [];
+  } finally {
+    loadingExistingTests.value = false;
+  }
+}
+
+function formatDateTime(v) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString();
+}
+
+function formatMaxAttempts(v) {
+  const n = v == null ? null : Number(v);
+  if (!n || n <= 0) return 'без ограничений';
+  return String(n);
+}
+
+function formatPassPercent(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (Number.isNaN(n)) return String(v);
+  return `${n}%`;
+}
+
+async function deleteTestById(test) {
+  deleteError.value = '';
+  const id = test?.id;
+  const title = test?.title || `Тест #${id}`;
+  if (!id) return;
+  const ok = window.confirm(
+    `Удалить тест "${title}"?\n\nБудут удалены также попытки студентов по этому тесту.`
+  );
+  if (!ok) return;
+  try {
+    await axios.delete(`${apiBase}/api/tests/${id}`, { headers: getAuthHeaders() });
+    await loadExistingTests();
+  } catch (e) {
+    console.error(e);
+    deleteError.value =
+      (e.response && e.response.data && e.response.data.message) ||
+      'Не удалось удалить тест.';
+  }
+}
+
 async function loadBank() {
   try {
     loading.value = true;
+    const id = bankQueryId.value ? parseInt(bankQueryId.value, 10) : null;
     const res = await axios.get(`${apiBase}/api/questions`, {
-      params: { q: bankQuery.value || '', limit: 200, offset: 0 },
+      params: {
+        id: id && !Number.isNaN(id) ? id : undefined,
+        q: bankQuery.value || '',
+        limit: 200,
+        offset: 0
+      },
       headers: getAuthHeaders()
     });
     bankItems.value = res.data.items || [];
@@ -51,6 +218,7 @@ async function loadBank() {
 
 onMounted(() => {
   loadBank();
+  loadExistingTests();
 });
 
 function isSelected(id) {
@@ -222,7 +390,12 @@ function createTest() {
               : null
         };
   axios
-    .post(`${apiBase}/api/tests`, payload, { headers: getAuthHeaders() })
+    .request({
+      method: editingTestId.value ? 'put' : 'post',
+      url: editingTestId.value ? `${apiBase}/api/tests/${editingTestId.value}` : `${apiBase}/api/tests`,
+      data: payload,
+      headers: getAuthHeaders()
+    })
     .then(() => {
       step.value = 1;
       selectedItems.value = [];
@@ -231,7 +404,10 @@ function createTest() {
       testTitle.value = '';
       testDescription.value = '';
       creating.value = false;
+      editingTestId.value = null;
+      editError.value = '';
       loadBank();
+      loadExistingTests();
     })
     .catch((e) => {
       creating.value = false;
@@ -251,6 +427,56 @@ function cancelCreate() {
   testTitle.value = '';
   testDescription.value = '';
   createError.value = '';
+  editingTestId.value = null;
+  editError.value = '';
+}
+
+async function editTestById(test) {
+  editError.value = '';
+  const id = test?.id;
+  if (!id) return;
+  try {
+    editLoading.value = true;
+    const res = await axios.get(`${apiBase}/api/tests/${id}`, { headers: getAuthHeaders() });
+    const d = res.data || {};
+    editingTestId.value = d.id;
+    variantMode.value = d.variantMode || 'single_shuffled';
+    testTitle.value = d.title || '';
+    testDescription.value = d.description || '';
+    passPercent.value = d.passPercent ?? 60;
+    maxAttempts.value = d.maxAttempts ?? 0;
+
+    if (variantMode.value === 'per_variant') {
+      variants.value = (d.variants || []).map((v, idx) => ({
+        label: v.label || `Вариант ${idx + 1}`,
+        items: (v.questions || []).map((q) => ({
+          id: q.id,
+          text: (q.text || '').slice(0, 120),
+          points: q.points || 1
+        }))
+      }));
+      if (variants.value.length === 0) {
+        variants.value = [{ label: 'Вариант 1', items: [] }];
+      }
+      activeVariantIndex.value = 0;
+      selectedItems.value = [];
+    } else {
+      selectedItems.value = (d.questions || []).map((q) => ({
+        id: q.id,
+        text: (q.text || '').slice(0, 120),
+        points: q.points || 1
+      }));
+      variants.value = [{ label: 'Вариант 1', items: [] }];
+      activeVariantIndex.value = 0;
+    }
+
+    step.value = 2;
+  } catch (e) {
+    console.error(e);
+    editError.value = (e.response && e.response.data && e.response.data.message) || 'Не удалось загрузить тест.';
+  } finally {
+    editLoading.value = false;
+  }
 }
 </script>
 
@@ -258,6 +484,72 @@ function cancelCreate() {
   <div class="container mt-4">
     <h5 class="mb-3">Конструктор тестов</h5>
     <p class="text-muted small">Выберите вопросы из банка заданий вручную или укажите количество — нужное число вопросов будет выбрано случайно. Затем задайте название теста и создайте его после проверки.</p>
+
+    <div class="card p-4 mb-4">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h6 class="mb-0">Существующие тесты</h6>
+        <div class="d-flex align-items-center gap-2">
+          <input
+            v-model="existingTestIdFilter"
+            type="number"
+            min="1"
+            class="form-control form-control-sm"
+            style="width: 140px;"
+            placeholder="ID теста"
+            @keyup.enter="loadExistingTests"
+          />
+          <button class="btn btn-sm btn-outline-primary" type="button" :disabled="loadingExistingTests" @click="loadExistingTests">
+            {{ loadingExistingTests ? 'Обновление…' : 'Найти/обновить' }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="editError" class="alert alert-danger py-2 mb-3">{{ editError }}</div>
+      <div v-if="deleteError" class="alert alert-danger py-2 mb-3">{{ deleteError }}</div>
+      <div v-if="testsSearchStatus" class="alert alert-info py-2 mb-3">{{ testsSearchStatus }}</div>
+
+      <div v-if="loadingExistingTests" class="text-muted small">Загрузка списка тестов…</div>
+      <div v-else class="table-responsive">
+        <table class="table table-sm table-bordered align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="width: 70px;">ID</th>
+              <th>Название</th>
+              <th style="width: 140px;">Режим</th>
+              <th style="width: 130px;">Порог</th>
+              <th style="width: 170px;">Попытки</th>
+              <th style="width: 190px;">Создан</th>
+              <th style="width: 180px;">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in existingTests" :key="t.id">
+              <td>{{ t.id }}</td>
+              <td>{{ t.title }}</td>
+              <td>
+                {{ t.variant_mode === 'per_variant' ? 'Несколько вариантов' : 'Один вариант' }}
+              </td>
+              <td>{{ formatPassPercent(t.pass_percent) }}</td>
+              <td>{{ formatMaxAttempts(t.max_attempts) }}</td>
+              <td>{{ formatDateTime(t.created_at) }}</td>
+              <td>
+                <div class="d-flex gap-1">
+                  <button class="btn btn-sm btn-outline-primary" type="button" :disabled="editLoading" @click="editTestById(t)">
+                    {{ editLoading && editingTestId === t.id ? 'Загрузка…' : 'Редактировать' }}
+                  </button>
+                  <button class="btn btn-sm btn-outline-danger" type="button" @click="deleteTestById(t)">
+                    Удалить
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="existingTests.length === 0">
+              <td colspan="7" class="text-muted text-center py-3">Тестов пока нет.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- Шаг 1: выбор вопросов -->
     <div v-if="step === 1" class="card p-4">
@@ -309,6 +601,10 @@ function cancelCreate() {
             <button class="btn btn-primary" type="button" @click="loadBank">Найти</button>
           </div>
         </div>
+        <div class="col-md-2">
+          <label class="form-label">Поиск по ID</label>
+          <input v-model="bankQueryId" type="number" min="1" class="form-control" placeholder="ID" @keyup.enter="loadBank" />
+        </div>
         <div class="col-md-6">
           <label class="form-label">Добавить случайных вопросов</label>
           <div class="input-group">
@@ -318,6 +614,8 @@ function cancelCreate() {
           <span v-if="randomWarning" class="text-warning small d-block">{{ randomWarning }}</span>
         </div>
       </div>
+
+      <div v-if="bankSearchStatus" class="alert alert-info py-2 mb-3">{{ bankSearchStatus }}</div>
 
       <p class="small text-muted">
         <template v-if="variantMode === 'single_shuffled'">Выберите вопросы из списка или добавьте случайные. Выбрано: {{ selectedItems.length }}</template>
@@ -450,7 +748,7 @@ function cancelCreate() {
 
       <div class="d-flex gap-2 mt-4">
         <button class="btn btn-success" type="button" :disabled="creating" @click="createTest">
-          {{ creating ? 'Создание…' : 'Создать тест' }}
+          {{ creating ? (editingTestId ? 'Сохранение…' : 'Создание…') : (editingTestId ? 'Сохранить изменения' : 'Создать тест') }}
         </button>
         <button class="btn btn-primary" type="button" @click="changeTest">Изменить тест</button>
         <button class="btn btn-secondary" type="button" @click="cancelCreate">Отменить создание теста</button>
