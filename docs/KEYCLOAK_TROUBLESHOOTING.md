@@ -1,9 +1,12 @@
-# Устранение ошибки 400 Bad Request в Keycloak
+# Keycloak: частые проблемы и решения
 
-## Проблема
-При попытке авторизации через Keycloak возникает ошибка 400 Bad Request.
+## Симптомы
 
-## Решение
+- При входе/обновлении страницы вы видите ошибку **400 Bad Request**.
+- После обновления любой страницы приложение уходит в **бесконечные редиректы/«ребут»**.
+- После входа вы не возвращаетесь в приложение, или Keycloak ругается на redirect URI.
+
+## Что проверить в первую очередь
 
 ### 1. Проверьте, что Keycloak запущен
 ```bash
@@ -55,6 +58,7 @@ docker-compose ps
      http://localhost:5173/*
      http://localhost:5173/
      http://localhost:5173
+     http://localhost:5173/silent-check-sso.html
      ```
    - **Valid post logout redirect URIs**: добавьте:
      ```
@@ -83,6 +87,7 @@ docker-compose ps
    http://localhost:5173/*
    http://localhost:5173/
    http://localhost:5173
+   http://localhost:5173/silent-check-sso.html
    ```
 
 3. Вкладка **Settings** → секция **Web origins**:
@@ -126,6 +131,7 @@ docker-compose logs keycloak
 - `http://localhost:5173/*`
 - `http://localhost:5173/`
 - `http://localhost:5173`
+- `http://localhost:5173/silent-check-sso.html`
 
 ### Ошибка: "Client not found"
 **Причина**: Клиент `irtran-client` не создан
@@ -137,7 +143,20 @@ docker-compose logs keycloak
 
 ## Дополнительная информация
 
-После правильной настройки, при нажатии кнопки "Войти" в приложении, вы должны быть перенаправлены на страницу входа Keycloak, а не получить ошибку 400.
+После правильной настройки, при нажатии кнопки **«Войти»** в приложении вы должны:
+
+- попасть на страницу входа Keycloak;
+- после входа вернуться в SPA на `http://localhost:5173`.
+
+### Если есть бесконечный «ребут» после F5
+
+Это почти всегда цикл **check-sso → redirect → check-sso**, когда не настроен silent-check или Keycloak не принимает redirect.
+
+Что сделать:
+
+1. Проверьте наличие файла `IrTRAN-main/public/silent-check-sso.html`.
+2. Добавьте `http://localhost:5173/silent-check-sso.html` в **Valid redirect URIs** клиента `irtran-client`.
+3. Очистите cookies для `localhost:8080` и `localhost:5173` и попробуйте снова.
 
 
 

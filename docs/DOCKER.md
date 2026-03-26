@@ -126,6 +126,11 @@ npx sequelize-cli db:migrate
 **Проверка:** после успешного выполнения в БД появятся таблицы (document_types, stations, request_transportations и др.). Можно проверить, зайдя в контейнер MySQL:  
 `docker exec -it irtran-mysql mysql -uirtran -pirtran irtran -e "SHOW TABLES;"`
 
+### Что важно по миграциям в актуальной версии
+
+- Если используете **тесты и лимиты попыток**, убедитесь, что применены миграции для таблицы `test_attempts`, включая поля:
+  - `status`, `started_at`, `finished_at`.
+
 ---
 
 ## Режим разработки (без Docker для backend и frontend)
