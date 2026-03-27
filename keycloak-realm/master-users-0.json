@@ -1,28 +1,6 @@
 {
   "realm" : "master",
-  "users" : [ {
-    "id" : "508a1544-0548-456b-a0cf-da896036113b",
-    "username" : "admin",
-    "emailVerified" : false,
-    "attributes" : {
-      "is_temporary_admin" : [ "true" ]
-    },
-    "enabled" : true,
-    "createdTimestamp" : 1771946018188,
-    "totp" : false,
-    "credentials" : [ {
-      "id" : "a6bd35a0-49a6-4c0a-a40e-8ef596f2820b",
-      "type" : "password",
-      "createdDate" : 1771946018445,
-      "secretData" : "{\"value\":\"j0qeaV/SGyerVK9UfiCbBPhlAAtwQn1u6bGOxuIujJE=\",\"salt\":\"R6FCG7CpeO3IMCn1OFrFTA==\",\"additionalParameters\":{}}",
-      "credentialData" : "{\"hashIterations\":5,\"algorithm\":\"argon2\",\"additionalParameters\":{\"hashLength\":[\"32\"],\"memory\":[\"7168\"],\"type\":[\"id\"],\"version\":[\"1.3\"],\"parallelism\":[\"1\"]}}"
-    } ],
-    "disableableCredentialTypes" : [ ],
-    "requiredActions" : [ ],
-    "realmRoles" : [ "default-roles-master", "admin" ],
-    "notBefore" : 0,
-    "groups" : [ ]
-  }, {
+  "users" : [{
     "id" : "03902bf4-344b-42d3-96f2-acfa42b496a1",
     "username" : "arturtester@irtrantester.ru",
     "firstName" : "Артур",
