@@ -23,6 +23,12 @@ COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# sequelize-cli в devDependencies и не попадает в образ при npm ci --omit=dev
+RUN npm install sequelize-cli@6.6.3 --no-save --omit=optional --no-audit --no-fund
+
+RUN chmod +x ./docker-entrypoint.sh
+
 EXPOSE 3000
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "app.js"]

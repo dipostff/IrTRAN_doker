@@ -12,13 +12,11 @@
    docker-compose up -d
    ```
 
-3. Дождитесь готовности MySQL и Keycloak (≈30–60 сек). При первом запуске при необходимости выполните миграции БД (см. ниже).
+3. Дождитесь готовности MySQL и Keycloak (≈30–60 сек). Контейнер **backend** при каждом старте сам выполняет `sequelize-cli db:migrate` (см. раздел «Миграции БД»).
 
-4. Выполните миграции БД (см. раздел «Миграции БД» ниже).
+4. Настройте Keycloak: создайте клиента `irtran-client` в реалме `master` (см. README и keycloak-setup.md).
 
-5. Настройте Keycloak: создайте клиента `irtran-client` в реалме `master` (см. README и keycloak-setup.md).
-
-6. Откройте в браузере:
+5. Откройте в браузере:
    - Фронт: http://localhost:5173  
    - Бэкенд API: http://localhost:3000  
    - Keycloak Admin: http://localhost:8080 (логин: admin, пароль: admin)
@@ -105,7 +103,13 @@ KEYCLOAK_REALM=master
 
 Миграции создают таблицы в MySQL. БД в Docker доступна на `localhost:3306`, учётные данные — из `.env` (по умолчанию пользователь `irtran`, пароль `irtran`, база `irtran`).
 
-**С хоста (рекомендуется):** из каталога `irtran_server-main` задайте переменные под вашу БД в Docker и выполните миграции.
+### Автоматически при `docker-compose up` (backend)
+
+Образ backend использует `docker-entrypoint.sh`: перед `node app.js` выполняется `npx sequelize-cli db:migrate` с окружением из `NODE_ENV` (в compose обычно `production`). Переменные `DATABASE_HOST`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_NAME` задаются в `docker-compose` и читаются из `config/databases.js`.
+
+Чтобы **отключить** автоматические миграции (например, для отладки), в сервис `backend` добавьте `RUN_MIGRATIONS=0` или `RUN_MIGRATIONS=false`.
+
+**С хоста (если backend не в Docker):** из каталога `irtran_server-main` задайте переменные под вашу БД и выполните миграции вручную.
 
 **Windows (PowerShell):**
 ```powershell
