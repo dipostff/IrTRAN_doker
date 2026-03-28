@@ -26,9 +26,10 @@ COPY . .
 # sequelize-cli в devDependencies и не попадает в образ при npm ci --omit=dev
 RUN npm install sequelize-cli@6.6.3 --no-save --omit=optional --no-audit --no-fund
 
-RUN chmod +x ./docker-entrypoint.sh
+# Windows CRLF в скрипте даёт: exec ./docker-entrypoint.sh: no such file or directory
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 3000
 
-ENTRYPOINT ["./docker-entrypoint.sh"]
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 CMD ["node", "app.js"]
