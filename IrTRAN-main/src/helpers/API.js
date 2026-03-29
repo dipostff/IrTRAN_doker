@@ -378,8 +378,12 @@ export async function saveTransporation(object) {
     };
 
     let response = await sendRequest(baseUrl + '/requests_transportation', request);
-    
+
     console.log('API response', response);
+
+    if (!response || response.error) {
+        return response;
+    }
 
     return getTransportation(response.id);
 }
@@ -497,6 +501,15 @@ export async function createBugReport(data) {
 export async function updateBugReport(id, data) {
     const response = await apiClient.patch(`${baseUrl}/api/bug-reports/${id}`, data);
     return response.data;
+}
+
+//--------------------------------------------------
+// Прогресс учебного сценария (тренажёр документов)
+//--------------------------------------------------
+
+export async function postTrainingScenarioProgress(body) {
+  const url = `${baseUrl}/api/training/scenario-progress`;
+  await apiClient.post(url, body);
 }
 
 //--------------------------------------------------

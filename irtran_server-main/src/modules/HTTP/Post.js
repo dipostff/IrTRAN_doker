@@ -7,6 +7,21 @@ const sequelize = require('./../sequelize/db');
 const keycloakAuth = require('./../auth/keycloakAuth');
 //-----------Подключаемые модули-----------//
 
+/** Many-to-many: клиент может прислать id или полные объекты с полем id */
+function normalizeBelongsToManyIds(value) {
+  if (value === undefined) return undefined;
+  const arr = Array.isArray(value) ? value : [value];
+  return arr
+    .map((item) => {
+      if (item == null) return null;
+      if (typeof item === 'object' && item !== null && item.id !== undefined) {
+        return item.id;
+      }
+      return item;
+    })
+    .filter((id) => id !== null && id !== undefined);
+}
+
 /**
  * Класс для работы с Post запросами к серверу
  */
@@ -81,7 +96,10 @@ class Post {
         if(hasManyToMany) {
           for(let association of modelAssociations) {
             if(message.body.object[association] !== undefined) {
-              await result[`add${association}`](message.body.object[association]);
+              const ids = normalizeBelongsToManyIds(message.body.object[association]);
+              if (ids.length) {
+                await result[`add${association}`](ids);
+              }
             }
           }
         }
@@ -144,7 +162,8 @@ class Post {
         if (hasManyToMany) {
           for (const association of modelAssociations) {
             if (message.body.object[association] !== undefined) {
-              await instance[`set${association}`](message.body.object[association]);
+              const ids = normalizeBelongsToManyIds(message.body.object[association]);
+              await instance[`set${association}`](ids);
             }
           }
         }

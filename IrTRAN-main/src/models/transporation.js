@@ -85,50 +85,63 @@ export class Transporation {
         ]);
     }
 
+    /**
+     * Сообщение о блокирующей ошибке перед сохранением или null, если можно сохранять.
+     * Используется тренажёром при включённой «Проверке ошибок».
+     */
+    static getBlockingMessage(object) {
+        if (Transporation.checkSignature(object)) {
+            return null;
+        }
+
+        const requiredFields = this.getRequiredFields();
+        for (const field in requiredFields) {
+            if (!object[field]) {
+                return requiredFields[field];
+            }
+        }
+
+        const dateMsg = Transporation.getDateValidationMessage(object);
+        if (dateMsg) return dateMsg;
+
+        if (!object.Sendings || object.Sendings.length === 0) {
+            return "Не указаны отправки";
+        }
+
+        return null;
+    }
+
     static checkRequiredFields(object) {
         updateSubtitle("");
 
-        if (Transporation.checkSignature(object)) {
-            return;
-        }
-
-        let requiredFields = this.getRequiredFields();
-
-        for (let field in requiredFields) {
-            if (!object[field]) {
-                updateSubtitle(requiredFields[field]);
-                return;
-            }
-        }
-
-        let cont = this.checkCorrectDate(object);
-
-        if (cont) {
-            if (object.Sendings.length === 0) {
-                updateSubtitle("Не указаны отправки");
-                return;
-            }
+        const msg = Transporation.getBlockingMessage(object);
+        if (msg) {
+            updateSubtitle(msg);
         }
     }
 
-    static checkCorrectDate(object) {
+    static getDateValidationMessage(object) {
         if (object.registration_date < date) {
-            updateSubtitle("Дата регистрации должна быть не раньше текущей даты");
-            return;
+            return "Дата регистрации должна быть не раньше текущей даты";
         }
         if (object.transportation_date_from > object.transportation_date_to) {
-            updateSubtitle("Начало перевозки должно быть раньше конца перевозки");
-            return;
+            return "Начало перевозки должно быть раньше конца перевозки";
         }
         if (object.transportation_date_from < date || object.transportation_date_to < date) {
-            updateSubtitle("Период перевозок должен быть не раньше текущей даты");
-            return;
+            return "Период перевозок должен быть не раньше текущей даты";
         }
         if (getDiffDays(object.transportation_date_from, object.transportation_date_to) > 45) {
-            updateSubtitle("Перевозка превышает 45 дней");
+            return "Перевозка превышает 45 дней";
+        }
+        return null;
+    }
+
+    static checkCorrectDate(object) {
+        const msg = Transporation.getDateValidationMessage(object);
+        if (msg) {
+            updateSubtitle(msg);
             return;
         }
-
         return true;
     }
 }

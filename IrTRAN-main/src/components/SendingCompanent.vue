@@ -66,7 +66,11 @@ export default {
             }
         },
         async saveDocument() {
-            let saveDoc = await saveSending(this.sending);
+            const saveDoc = await saveSending(this.sending);
+            if (!saveDoc || saveDoc.error || saveDoc.id == null) {
+                console.error("Не удалось сохранить отправку", saveDoc);
+                return;
+            }
             this.$emit("saveSending", saveDoc.id);
         }
     },

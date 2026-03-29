@@ -51,10 +51,14 @@ import { authorization } from "../helpers/API.js";
                             </router-link>
                         </div>
                         <div class="col-md-6">
-                            
-                            <router-link to="/beginner-instructions/menu" class="card-square" style="border-radius: 10px" href="">
+                            <router-link
+                                to="/beginner-instructions/filling-rules"
+                                class="card-square"
+                                style="border-radius: 10px"
+                                data-dismiss="modal"
+                            >
                                 <img src="https://sh-poperechenskaya-r81.gosweb.gosuslugi.ru/netcat_files/114/1883/ikonka_pravila_priema.png" alt="Правила заполнения" />
-                                <span class="card-text">Правила заполнения</span>
+                                <span class="card-text" style="text-decoration: none">Правила заполнения</span>
                             </router-link>
                         </div>
                     </div>

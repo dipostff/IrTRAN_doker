@@ -6,9 +6,12 @@ import router from "@/router";
 import { useRoute } from "vue-router";
 import { Transporation } from "@/models/transporation";
 import { useListsStore } from "@/stores/main";
+import { useTrainingSimulatorContext } from "@/composables/useTrainingSimulatorContext";
 import SendingCompanent from "@/components/SendingCompanent.vue";
+import TrainingScenarioPanel from "@/components/training/TrainingScenarioPanel.vue";
 
 const listsStore = useListsStore();
+const { trainingContext } = useTrainingSimulatorContext();
 
 const route = useRoute();
 const document = ref(Transporation.getDefaultDocument());
@@ -97,20 +100,39 @@ const freightCostFormatted = computed(() => {
     return total ? total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, " ") : "—";
 });
 
+/** API отдаёт Sendings как объекты; в БД и addSendings нужны только id */
+function normalizeSendingIds(sendings) {
+    if (!Array.isArray(sendings)) return [];
+    return sendings
+        .map((item) => {
+            if (item == null) return null;
+            if (typeof item === "object" && item.id != null) return Number(item.id);
+            const n = Number(item);
+            return Number.isFinite(n) ? n : null;
+        })
+        .filter((id) => id != null);
+}
+
 function normalizeDocument(data) {
     const base = Transporation.getDefaultDocument();
     const merged = Object.assign({}, base, data || {});
-    if (!Array.isArray(merged.Sendings)) {
-        merged.Sendings = merged.Sendings ? [...merged.Sendings] : [];
-    }
+    merged.Sendings = normalizeSendingIds(merged.Sendings);
     return merged;
 }
 
 async function saveDocument() {
     saveError.value = null;
+    if (trainingContext.value?.errorChecking) {
+        const msg = Transporation.getBlockingMessage(document.value);
+        if (msg) {
+            saveError.value = msg;
+            return;
+        }
+    }
     try {
         const payload = {
             ...document.value,
+            Sendings: normalizeSendingIds(document.value.Sendings),
             Payers: selectedPayerId.value ? [selectedPayerId.value] : []
         };
         let saveDoc = await saveTransporation(payload);
@@ -142,14 +164,11 @@ function deleteDocument() {
     router.push("/menu");
 }
 
-function updateSending(sendingId)
-{
-    if(document.value['Sendings'].includes(sendingId))
-    {
-        return;
-    }
-
-    document.value['Sendings'].push(sendingId);
+function updateSending(sendingId) {
+    const id = sendingId != null ? Number(sendingId) : NaN;
+    if (!Number.isFinite(id)) return;
+    if (document.value.Sendings.includes(id)) return;
+    document.value.Sendings.push(id);
 }
 
 async function fetchData() {
@@ -220,7 +239,11 @@ watch(
     watchedComputed,
     async (newVal, oldVal) => {
         Transporation.checkAutoFilledFields(newVal, oldVal);
-        Transporation.checkRequiredFields(newVal);
+        const tc = trainingContext.value;
+        const runRequiredCheck = !tc || tc.errorChecking;
+        if (runRequiredCheck) {
+            Transporation.checkRequiredFields(newVal);
+        }
 
         if (newVal.update) {
             delete newVal.update;
@@ -241,11 +264,24 @@ watch(
                 <simple-button @click="deleteDocument" v-if="document.id" title="Испортить" />
             </div>
         </div>
-        <div class="row mt-2" v-if="saveError">
+        <div
+            class="row mt-2"
+            v-if="saveError && (!trainingContext || trainingContext.errorVisibility)"
+        >
             <div class="col-auto">
-                <div class="alert alert-danger py-1 px-2 mb-0">{{ saveError }}</div>
+                <div
+                    class="alert alert-danger py-1 px-2 mb-0"
+                    role="button"
+                    tabindex="0"
+                    style="cursor: pointer"
+                    title="Скрыть сообщение"
+                    @click="saveError = null"
+                    @keydown.enter.prevent="saveError = null"
+                    @keydown.space.prevent="saveError = null"
+                >{{ saveError }}</div>
             </div>
         </div>
+        <TrainingScenarioPanel doc-type="transportation" :document="document" />
     </div>
     <div class="content-container">
         <ul class="nav nav-tabs" id="myTab" role="tablist">

@@ -2,6 +2,9 @@
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useListsStore } from "@/stores/main";
+import { useTrainingSimulatorContext } from "@/composables/useTrainingSimulatorContext";
+import TrainingScenarioPanel from "@/components/training/TrainingScenarioPanel.vue";
+import { validateTrainingDocument } from "@/helpers/trainingDocumentValidators";
 import { updateTitle } from "@/helpers/headerHelper";
 import { getLegalEntities, saveStudentDocument, updateStudentDocument } from "@/helpers/API";
 import { getToken } from "@/helpers/keycloak";
@@ -9,6 +12,7 @@ import { getToken } from "@/helpers/keycloak";
 const route = useRoute();
 const router = useRouter();
 const listsStore = useListsStore();
+const { trainingContext } = useTrainingSimulatorContext();
 const STORAGE_KEY = "cumulative_statement_documents";
 const saveError = ref(null);
 const saveSuccess = ref(null);
@@ -46,6 +50,15 @@ function getStoredList() {
 async function saveDocument() {
     saveError.value = null;
     saveSuccess.value = null;
+    if (trainingContext.value) {
+        if (trainingContext.value.errorChecking) {
+            const err = validateTrainingDocument("cumulative_statement", document.value);
+            if (err) {
+                saveError.value = err;
+                return;
+            }
+        }
+    }
     try {
         const list = getStoredList();
         const doc = { ...document.value };
@@ -137,12 +150,16 @@ onMounted(async () => {
                 <button type="button" class="btn btn-custom" @click="spoilDocument">Испортить</button>
             </div>
         </div>
-        <div class="row mt-2" v-if="saveError">
+        <div
+            class="row mt-2"
+            v-if="saveError && (!trainingContext || trainingContext.errorVisibility)"
+        >
             <div class="col-auto"><div class="alert alert-danger py-1 px-2 mb-0">{{ saveError }}</div></div>
         </div>
         <div class="row mt-2" v-if="saveSuccess">
             <div class="col-auto"><div class="alert alert-success py-1 px-2 mb-0">{{ saveSuccess }}</div></div>
         </div>
+        <TrainingScenarioPanel doc-type="cumulative_statement" :document="document" />
     </div>
 
     <div class="content-container">

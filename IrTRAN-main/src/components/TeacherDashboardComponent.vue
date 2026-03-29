@@ -25,6 +25,20 @@ const groupPerformance = ref(null);
 const perfLoading = ref(false);
 const perfError = ref('');
 
+const trainingProgress = ref(null);
+const trainingLoading = ref(false);
+const trainingError = ref('');
+
+const trainingDocLabels = {
+  transportation: 'Заявка',
+  invoice: 'Накладная',
+  reminder: 'Памятка',
+  common_act: 'Акт (общ.)',
+  commercial_act: 'Ком. акт',
+  filling_statement: 'Ведомость п/у',
+  cumulative_statement: 'Накоп. ведомость',
+};
+
 // filters for detail tables
 const testDetailFilter = ref({}); // { [testId]: 'all'|'passed'|'failed'|'not_attempted'|'problems' }
 const scenarioDetailFilter = ref({}); // { [scenarioId]: 'all'|'viewed'|'not_viewed'|'problems' }
@@ -34,6 +48,23 @@ const profileModalOpen = ref(false);
 const profileLoading = ref(false);
 const profileError = ref('');
 const profileData = ref(null);
+
+const trainingTableDocKeys = computed(() => {
+  const set = new Set();
+  for (const st of trainingProgress.value?.students || []) {
+    Object.keys(st.progress || {}).forEach((k) => set.add(k));
+  }
+  return Array.from(set).sort();
+});
+
+function formatTrainingDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return '';
+  }
+}
 
 const filteredStudents = computed(() => {
   const q = searchStudent.value.toLowerCase().trim();
@@ -218,6 +249,29 @@ async function loadGroupPerformance() {
   } finally {
     perfLoading.value = false;
   }
+  loadTrainingScenarioProgress();
+}
+
+async function loadTrainingScenarioProgress() {
+  if (!selectedGroupId.value) {
+    trainingProgress.value = null;
+    return;
+  }
+  try {
+    trainingLoading.value = true;
+    trainingError.value = '';
+    const response = await axios.get(
+      `${baseUrl()}/api/teacher/groups/${selectedGroupId.value}/training-scenario-progress`,
+      { headers: authHeaders() }
+    );
+    trainingProgress.value = response.data || null;
+  } catch (e) {
+    console.error('Error loading training scenario progress:', e);
+    trainingError.value = 'Не удалось загрузить прогресс тренажёра.';
+    trainingProgress.value = null;
+  } finally {
+    trainingLoading.value = false;
+  }
 }
 
 function memberDisplayName(m) {
@@ -280,6 +334,7 @@ async function deleteSelectedGroup() {
     selectedGroupId.value = '';
     groupMembers.value = [];
     groupPerformance.value = null;
+    trainingProgress.value = null;
     await loadGroups();
   } catch (e) {
     console.error('Error deleting group:', e);
@@ -562,6 +617,51 @@ onMounted(() => {
                     </div>
                   </details>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mb-3">
+            <div class="card-body">
+              <h6 class="card-title mb-2">Тренажёр документов (прогресс сценария)</h6>
+              <p class="text-muted small mb-2">
+                Данные приходят с клиента при работе студента в режиме «Новичок»/«Продвинутый» (с задержкой ~2 с).
+              </p>
+              <div v-if="trainingLoading" class="text-muted">Загрузка прогресса...</div>
+              <div v-if="trainingError" class="text-danger">{{ trainingError }}</div>
+              <div
+                v-if="trainingProgress && trainingProgress.students && trainingProgress.students.length && trainingTableDocKeys.length"
+                class="table-responsive"
+              >
+                <table class="table table-sm table-striped align-middle">
+                  <thead>
+                    <tr>
+                      <th>Студент</th>
+                      <th v-for="dk in trainingTableDocKeys" :key="dk">{{ trainingDocLabels[dk] || dk }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="st in trainingProgress.students" :key="st.userId">
+                      <td>{{ memberDisplayName(st) }}</td>
+                      <td v-for="dk in trainingTableDocKeys" :key="`${st.userId}-${dk}`">
+                        <template v-if="st.progress && st.progress[dk]">
+                          <span class="fw-semibold">{{ st.progress[dk].percent }}%</span>
+                          <span class="text-muted small">
+                            ({{ st.progress[dk].doneCount }}/{{ st.progress[dk].totalCount }})
+                          </span>
+                          <div class="text-muted small">{{ formatTrainingDate(st.progress[dk].updatedAt) }}</div>
+                        </template>
+                        <template v-else>—</template>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div
+                v-else-if="trainingProgress && trainingProgress.students && trainingProgress.students.length && !trainingLoading"
+                class="text-muted small"
+              >
+                Пока нет сохранённых снимков прогресса по типам документов.
               </div>
             </div>
           </div>

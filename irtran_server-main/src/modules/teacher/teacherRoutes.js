@@ -17,6 +17,7 @@ const Test = require('./../../models/Test');
 const TestAttempt = require('./../../models/TestAttempt');
 const Scenario = require('./../../models/Scenario');
 const ScenarioView = require('./../../models/ScenarioView');
+const TrainingScenarioSnapshot = require('./../../models/TrainingScenarioSnapshot');
 //-----------Подключаемые модули-----------//
 
 /**
@@ -807,6 +808,133 @@ function registerTeacherRoutes(app) {
         return res.status(500).json({
           error: 'student_profile_failed',
           message: 'Не удалось получить профиль студента.'
+        });
+      }
+    }
+  );
+
+  // Прогресс учебных сценариев (тренажёр документов): сохранение со стороны студента
+  router.post(
+    '/api/training/scenario-progress',
+    keycloakAuth.verifyToken(),
+    async (req, res) => {
+      try {
+        const user = req.user || {};
+        const userId = user.sub;
+        if (!userId) return res.status(401).json({ error: 'unauthorized' });
+
+        const { docType, docRef, doneCount, totalCount, doneStepIds } = req.body || {};
+        if (!docType || docRef === undefined || docRef === null) {
+          return res.status(400).json({
+            error: 'bad_payload',
+            message: 'Укажите docType и docRef.'
+          });
+        }
+
+        const refStr = String(docRef).slice(0, 191);
+        const uname = user.preferred_username || user.username || null;
+        const dc = Math.max(0, parseInt(String(doneCount), 10) || 0);
+        const tc = Math.max(0, parseInt(String(totalCount), 10) || 0);
+        const ids = Array.isArray(doneStepIds) ? doneStepIds.map((x) => String(x)) : [];
+
+        const [row] = await TrainingScenarioSnapshot.findOrCreate({
+          where: {
+            user_id: String(userId),
+            doc_type: String(docType).slice(0, 64),
+            doc_ref: refStr
+          },
+          defaults: {
+            username: uname,
+            done_count: dc,
+            total_count: tc,
+            done_step_ids: ids
+          }
+        });
+
+        await row.update({
+          username: uname || row.username,
+          done_count: dc,
+          total_count: tc,
+          done_step_ids: ids
+        });
+
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Error saving training scenario progress:', error);
+        return res.status(500).json({
+          error: 'training_progress_save_failed',
+          message: 'Не удалось сохранить прогресс сценария.'
+        });
+      }
+    }
+  );
+
+  // Сводка прогресса тренажёра по группе (последний снимок на пару user + тип документа)
+  router.get(
+    '/api/teacher/groups/:groupId/training-scenario-progress',
+    keycloakAuth.verifyToken(),
+    keycloakAuth.requireAnyRealmRole(['teacher', 'app-admin']),
+    async (req, res) => {
+      try {
+        const ownerTeacherId = resolveOwnerTeacherId(req);
+        if (!ownerTeacherId) return res.status(401).json({ error: 'unauthorized' });
+        const groupId = req.params.groupId;
+        if (!isAppAdmin(req)) {
+          await assertGroupOwnedByTeacher(groupId, ownerTeacherId);
+        }
+
+        const members = (await listGroupMembers(groupId)) || [];
+        const memberBases = members.map((u) => ({
+          userId: u.id,
+          username: u.username,
+          email: u.email,
+          firstName: u.firstName,
+          lastName: u.lastName
+        }));
+        const memberIds = memberBases.map((m) => m.userId).filter(Boolean);
+
+        if (!memberIds.length) {
+          return res.json({ group: { id: groupId }, students: [] });
+        }
+
+        const snaps = await TrainingScenarioSnapshot.findAll({
+          where: { user_id: { [Op.in]: memberIds } },
+          order: [['updated_at', 'DESC']]
+        });
+
+        const latestByUserDoc = new Map();
+        for (const s of snaps) {
+          const key = `${s.user_id}::${s.doc_type}`;
+          if (!latestByUserDoc.has(key)) {
+            latestByUserDoc.set(key, s);
+          }
+        }
+
+        const students = memberBases.map((m) => {
+          const progress = {};
+          for (const [key, snap] of latestByUserDoc) {
+            if (!key.startsWith(`${m.userId}::`)) continue;
+            const docType = key.split('::')[1];
+            const total = Number(snap.total_count) || 0;
+            const done = Number(snap.done_count) || 0;
+            progress[docType] = {
+              docRef: snap.doc_ref,
+              doneCount: done,
+              totalCount: total,
+              percent: total > 0 ? Math.round((done / total) * 1000) / 10 : 0,
+              updatedAt: snap.updated_at
+            };
+          }
+          return { ...m, progress };
+        });
+
+        return res.json({ group: { id: groupId }, students });
+      } catch (error) {
+        const status = error.statusCode || 500;
+        console.error('Error training scenario group progress:', error.response?.data || error);
+        return res.status(status).json({
+          error: 'training_group_progress_failed',
+          message: status === 403 ? 'Нет доступа к группе.' : 'Не удалось получить прогресс тренажёра.'
         });
       }
     }

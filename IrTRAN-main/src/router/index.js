@@ -207,6 +207,16 @@ const router = createRouter({
                     name: "beginner-instructions-transporation",
                     component: () => import("../views/BeginnerTransporationView.vue"),
                 },
+                {
+                    path: "filling-rules",
+                    name: "beginner-instructions-filling-rules-menu",
+                    component: () => import("../views/BeginnerInstructionsFillingRulesMenuView.vue"),
+                },
+                {
+                    path: "filling-rules/:docType",
+                    name: "beginner-instructions-filling-rules-detail",
+                    component: () => import("../views/BeginnerInstructionsFillingRulesDetailView.vue"),
+                },
             ],
         },
         {
@@ -324,7 +334,9 @@ router.beforeEach(async (to, from, next) => {
 
 router.afterEach((toRoute, fromRoute) => {
     window.document.title = PAGE_TITLE[toRoute.name] ?? "Тренажер ЭТРАН";
-    console.log(toRoute); // this lets you check what else is available to you here
+    if (toRoute.name === "menu") {
+        sessionStorage.removeItem("irtran-training-profile");
+    }
 });
 
 export default router;
