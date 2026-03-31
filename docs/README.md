@@ -18,4 +18,5 @@
 - `GROUPS_TEACHER_DASHBOARD.md` — группы студентов через Keycloak + успеваемость группы.
 - `TESTS_AND_ATTEMPTS.md` — тесты, попытки, лимиты, логика “списание при открытии”.
 - `DICTIONARIES_IMPORT.md` — импорт справочников из JSON/XLSX и шаблоны.
+- `STUDENT_PERFORMANCE_AND_NOTIFICATIONS.md` — модуль «Успеваемость», уведомления/дедлайны, модерация профиля, авто-уведомления и эскалации.
 

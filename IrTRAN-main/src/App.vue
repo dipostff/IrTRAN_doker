@@ -4,7 +4,7 @@ import { RouterLink, RouterView } from 'vue-router'
 
 <template>
     <router-view v-slot="{ Component }">
-        <component :is="Component" />
+        <component v-if="Component" :is="Component" />
     </router-view>
 </template>
 

@@ -7,6 +7,8 @@ const {
   addRealmRolesToUser,
   removeRealmRolesFromUser
 } = require('./../auth/keycloakAdmin');
+const StudentProfile = require('./../../models/StudentProfile');
+const StudentProfileChangeRequest = require('./../../models/StudentProfileChangeRequest');
 //-----------Подключаемые модули-----------//
 
 /**
@@ -106,6 +108,140 @@ function registerAdminRoutes(app) {
         return res.status(500).json({
           error: 'admin_roles_failed',
           message: 'Не удалось обновить роли пользователя.'
+        });
+      }
+    }
+  );
+
+  // Заявки студентов на изменение дополнительных полей профиля (модерация)
+  router.get(
+    '/api/admin/student-profile-requests',
+    keycloakAuth.verifyToken(),
+    keycloakAuth.requireRealmRole('app-admin'),
+    async (req, res) => {
+      try {
+        const status = (req.query.status || 'pending').toString();
+        const where = {};
+        if (status && status !== 'all') {
+          where.status = status;
+        }
+        const rows = await StudentProfileChangeRequest.findAll({
+          where,
+          order: [['created_at', 'DESC']],
+          limit: 200
+        });
+        const users = await listUsers();
+        const byId = new Map(users.map((u) => [u.id, u]));
+        const out = rows.map((r) => {
+          const u = byId.get(r.user_id);
+          return {
+            id: r.id,
+            userId: r.user_id,
+            username: u?.username || null,
+            email: u?.email || null,
+            firstName: u?.firstName || null,
+            lastName: u?.lastName || null,
+            payload: r.payload,
+            status: r.status,
+            reviewComment: r.review_comment,
+            reviewerUserId: r.reviewer_user_id,
+            createdAt: r.created_at,
+            reviewedAt: r.reviewed_at
+          };
+        });
+        return res.json(out);
+      } catch (error) {
+        console.error('Error listing profile requests:', error);
+        return res.status(500).json({
+          error: 'profile_requests_failed',
+          message: 'Не удалось загрузить заявки.'
+        });
+      }
+    }
+  );
+
+  router.post(
+    '/api/admin/student-profile-requests/:id/approve',
+    keycloakAuth.verifyToken(),
+    keycloakAuth.requireRealmRole('app-admin'),
+    async (req, res) => {
+      try {
+        const id = parseInt(req.params.id, 10);
+        if (Number.isNaN(id)) {
+          return res.status(400).json({ error: 'bad_id' });
+        }
+        const reviewerId = String(req.user.sub || '');
+        const row = await StudentProfileChangeRequest.findByPk(id);
+        if (!row || row.status !== 'pending') {
+          return res.status(404).json({
+            error: 'not_found',
+            message: 'Заявка не найдена или уже обработана.'
+          });
+        }
+        const p = row.payload || {};
+        const now = new Date();
+        const [profile] = await StudentProfile.findOrCreate({
+          where: { user_id: row.user_id },
+          defaults: {
+            user_id: row.user_id,
+            created_at: now,
+            updated_at: now
+          }
+        });
+        await profile.update({
+          phone: p.phone != null ? p.phone : profile.phone,
+          patronymic: p.patronymic != null ? p.patronymic : profile.patronymic,
+          academic_group: p.academic_group != null ? p.academic_group : profile.academic_group,
+          student_book_id: p.student_book_id != null ? p.student_book_id : profile.student_book_id,
+          updated_at: now
+        });
+        await row.update({
+          status: 'approved',
+          reviewer_user_id: reviewerId,
+          reviewed_at: now,
+          review_comment: (req.body && req.body.comment) || null
+        });
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Error approve profile request:', error);
+        return res.status(500).json({
+          error: 'approve_failed',
+          message: 'Не удалось применить заявку.'
+        });
+      }
+    }
+  );
+
+  router.post(
+    '/api/admin/student-profile-requests/:id/reject',
+    keycloakAuth.verifyToken(),
+    keycloakAuth.requireRealmRole('app-admin'),
+    async (req, res) => {
+      try {
+        const id = parseInt(req.params.id, 10);
+        if (Number.isNaN(id)) {
+          return res.status(400).json({ error: 'bad_id' });
+        }
+        const reviewerId = String(req.user.sub || '');
+        const row = await StudentProfileChangeRequest.findByPk(id);
+        if (!row || row.status !== 'pending') {
+          return res.status(404).json({
+            error: 'not_found',
+            message: 'Заявка не найдена или уже обработана.'
+          });
+        }
+        await row.update({
+          status: 'rejected',
+          reviewer_user_id: reviewerId,
+          reviewed_at: new Date(),
+          review_comment: (req.body && req.body.comment) || null
+        });
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Error reject profile request:', error);
+        return res.status(500).json({
+          error: 'reject_failed',
+          message: 'Не удалось отклонить заявку.'
         });
       }
     }

@@ -1,7 +1,8 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import axios from 'axios';
-import { getToken, isAppAdmin } from '@/helpers/keycloak';
+import { getToken, isAppAdmin, isPureStudentAccount } from '@/helpers/keycloak';
+import { postReferenceMaterialView } from '@/helpers/API';
 
 const loading = ref(false);
 const items = ref([]);
@@ -141,6 +142,14 @@ async function downloadItem(item) {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
+
+    if (isPureStudentAccount()) {
+      try {
+        await postReferenceMaterialView(item.id);
+      } catch (e) {
+        console.warn('reference view log:', e);
+      }
+    }
   } catch (error) {
     console.error('Error downloading reference:', error);
     if (error.response && error.response.status === 410) {

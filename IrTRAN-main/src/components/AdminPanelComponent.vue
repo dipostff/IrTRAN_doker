@@ -8,6 +8,11 @@ const error = ref('');
 const users = ref([]);
 const searchEmail = ref('');
 
+const profileLoading = ref(false);
+const profileError = ref('');
+const profileRequests = ref([]);
+const profileStatusFilter = ref('pending');
+
 const filteredUsers = computed(() => {
   const q = searchEmail.value.toLowerCase().trim();
   if (!q) return users.value;
@@ -87,8 +92,61 @@ function toggleDictionaryAdmin(user) {
   updateRoles(user, add, remove);
 }
 
+async function loadProfileRequests() {
+  try {
+    profileLoading.value = true;
+    profileError.value = '';
+    const token = getToken();
+    const response = await axios.get(
+      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/student-profile-requests`,
+      {
+        params: { status: profileStatusFilter.value },
+        headers: { Authorization: token ? `Bearer ${token}` : '' }
+      }
+    );
+    profileRequests.value = response.data || [];
+  } catch (e) {
+    console.error(e);
+    profileError.value = 'Не удалось загрузить заявки студентов.';
+  } finally {
+    profileLoading.value = false;
+  }
+}
+
+async function approveProfileRequest(row) {
+  try {
+    const token = getToken();
+    await axios.post(
+      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/student-profile-requests/${row.id}/approve`,
+      {},
+      { headers: { Authorization: token ? `Bearer ${token}` : '' } }
+    );
+    await loadProfileRequests();
+  } catch (e) {
+    console.error(e);
+    profileError.value = 'Не удалось одобрить заявку.';
+  }
+}
+
+async function rejectProfileRequest(row) {
+  const comment = window.prompt('Комментарий для студента (необязательно):') || '';
+  try {
+    const token = getToken();
+    await axios.post(
+      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/student-profile-requests/${row.id}/reject`,
+      { comment },
+      { headers: { Authorization: token ? `Bearer ${token}` : '' } }
+    );
+    await loadProfileRequests();
+  } catch (e) {
+    console.error(e);
+    profileError.value = 'Не удалось отклонить заявку.';
+  }
+}
+
 onMounted(() => {
   loadUsers();
+  loadProfileRequests();
 });
 </script>
 
@@ -161,6 +219,72 @@ onMounted(() => {
             >
               {{ user.roles.includes('dictionary-admin') ? 'Убрать роль справочников' : 'Сделать админом справочников' }}
             </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <hr class="my-5" />
+
+    <h4 class="mb-3">Модерация данных студентов</h4>
+    <p class="text-muted small">
+      Заявки на изменение дополнительных полей профиля (телефон, отчество, группа, зачётная книжка). После одобрения
+      данные записываются в профиль тренажёра.
+    </p>
+    <div class="row mb-3">
+      <div class="col-md-4">
+        <label class="form-label">Статус</label>
+        <select v-model="profileStatusFilter" class="form-select" @change="loadProfileRequests">
+          <option value="pending">На рассмотрении</option>
+          <option value="approved">Одобренные</option>
+          <option value="rejected">Отклонённые</option>
+          <option value="all">Все</option>
+        </select>
+      </div>
+      <div class="col-md-4 d-flex align-items-end">
+        <button type="button" class="btn btn-outline-secondary" @click="loadProfileRequests">
+          Обновить список
+        </button>
+      </div>
+    </div>
+    <div v-if="profileLoading">Загрузка заявок…</div>
+    <div v-if="profileError" class="text-danger mb-2">{{ profileError }}</div>
+    <table v-if="!profileLoading" class="table table-sm table-striped align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Студент</th>
+          <th>Запрошенные данные</th>
+          <th>Статус</th>
+          <th>Дата</th>
+          <th>Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-if="!profileRequests.length">
+          <td colspan="6" class="text-center text-muted">Нет заявок.</td>
+        </tr>
+        <tr v-for="r in profileRequests" :key="r.id">
+          <td>{{ r.id }}</td>
+          <td>
+            <div>{{ (r.lastName || '') + ' ' + (r.firstName || '') }}</div>
+            <div class="small text-muted">{{ r.email || r.username }}</div>
+          </td>
+          <td>
+            <pre class="small mb-0 bg-light p-2 rounded">{{ JSON.stringify(r.payload, null, 2) }}</pre>
+          </td>
+          <td>{{ r.status }}</td>
+          <td class="small">{{ r.createdAt ? new Date(r.createdAt).toLocaleString() : '—' }}</td>
+          <td>
+            <template v-if="r.status === 'pending'">
+              <button type="button" class="btn btn-sm btn-success me-1" @click="approveProfileRequest(r)">
+                Одобрить
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger" @click="rejectProfileRequest(r)">
+                Отклонить
+              </button>
+            </template>
+            <span v-else class="text-muted small">—</span>
           </td>
         </tr>
       </tbody>

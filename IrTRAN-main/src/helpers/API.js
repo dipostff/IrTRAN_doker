@@ -513,6 +513,99 @@ export async function postTrainingScenarioProgress(body) {
 }
 
 //--------------------------------------------------
+// Модуль «Успеваемость» (только студент, см. isPureStudentAccount)
+//--------------------------------------------------
+
+export async function getStudentPerformance() {
+  const response = await apiClient.get(`${baseUrl}/api/student/performance`);
+  return response.data;
+}
+
+export async function postStudentProfileChangeRequest(payload) {
+  const response = await apiClient.post(`${baseUrl}/api/student/profile/change-request`, payload);
+  return response.data;
+}
+
+export async function postBeginnerSessionStart() {
+  const response = await apiClient.post(`${baseUrl}/api/student/beginner-session/start`);
+  return response.data;
+}
+
+export async function postBeginnerSessionEnd(sessionId) {
+  const response = await apiClient.post(`${baseUrl}/api/student/beginner-session/${sessionId}/end`);
+  return response.data;
+}
+
+export async function postReferenceMaterialView(documentId) {
+  await apiClient.post(`${baseUrl}/api/student/reference-views/${documentId}`);
+}
+
+//--------------------------------------------------
+// Модуль «Уведомления и дедлайны»
+//--------------------------------------------------
+
+export async function getNotifications(params = {}) {
+  const query = new URLSearchParams();
+  if (params.unreadOnly) query.set("unreadOnly", "1");
+  const url = `${baseUrl}/api/notifications${query.toString() ? "?" + query.toString() : ""}`;
+  const response = await apiClient.get(url);
+  return response.data;
+}
+
+export async function markNotificationRead(id) {
+  const response = await apiClient.patch(`${baseUrl}/api/notifications/${id}/read`);
+  return response.data;
+}
+
+export async function markAllNotificationsRead() {
+  const response = await apiClient.patch(`${baseUrl}/api/notifications/read-all`);
+  return response.data;
+}
+
+export async function getNotificationStudents() {
+  const response = await apiClient.get(`${baseUrl}/api/notifications/student-users`);
+  return response.data;
+}
+
+export async function getNotificationGroups() {
+  const response = await apiClient.get(`${baseUrl}/api/notifications/groups`);
+  return response.data;
+}
+
+export async function createNotifications(payload) {
+  const response = await apiClient.post(`${baseUrl}/api/notifications`, payload);
+  return response.data;
+}
+
+export async function getNotificationsCatalog() {
+  const response = await apiClient.get(`${baseUrl}/api/notifications/catalog`);
+  return response.data;
+}
+
+export async function getLearningDeadlines(params = {}) {
+  const query = new URLSearchParams();
+  if (params.userId) query.set("userId", String(params.userId));
+  const url = `${baseUrl}/api/learning-deadlines${query.toString() ? "?" + query.toString() : ""}`;
+  const response = await apiClient.get(url);
+  return response.data;
+}
+
+export async function saveLearningDeadline(payload) {
+  const response = await apiClient.post(`${baseUrl}/api/learning-deadlines`, payload);
+  return response.data;
+}
+
+export async function saveLearningDeadlineForGroup(payload) {
+  const response = await apiClient.post(`${baseUrl}/api/learning-deadlines/by-group`, payload);
+  return response.data;
+}
+
+export async function deleteLearningDeadline(id) {
+  const response = await apiClient.delete(`${baseUrl}/api/learning-deadlines/${id}`);
+  return response.data;
+}
+
+//--------------------------------------------------
 
 function processingArray(array) {
     if (!Array.isArray(array)) {

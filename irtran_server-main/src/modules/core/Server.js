@@ -18,6 +18,8 @@ const { registerAdminRoutes } = require('./../admin/adminRoutes');
 const { registerTeacherRoutes } = require('./../teacher/teacherRoutes');
 const { registerDocumentsRoutes } = require('./../documents/documentsRoutes');
 const { registerBugReportsRoutes } = require('./../bugReports/bugReportsRoutes');
+const { registerStudentRoutes } = require('./../student/studentRoutes');
+const { registerNotificationsRoutes } = require('./../notifications/notificationsRoutes');
 //-----------Подключаемые модули-----------//
 
 /**
@@ -128,6 +130,8 @@ class Server {
     registerTeacherRoutes(this.app);
     registerDocumentsRoutes(this.app);
     registerBugReportsRoutes(this.app);
+    registerStudentRoutes(this.app);
+    registerNotificationsRoutes(this.app);
   }
 
   /**

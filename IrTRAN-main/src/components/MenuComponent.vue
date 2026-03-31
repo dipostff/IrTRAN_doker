@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { hasAnyRealmRole, isAppAdmin, isDictionaryAdmin } from '@/helpers/keycloak';
+import { hasAnyRealmRole, isAppAdmin, isDictionaryAdmin, isStudent } from '@/helpers/keycloak';
 import AppID2 from '@/assets/IMAGES/AppID_2.png';
 import AppID1 from '@/assets/IMAGES/AppID_1.png';
 import AppID19 from '@/assets/IMAGES/AppID_19.png';
@@ -41,7 +41,14 @@ const CATEGORIES = [
     label: 'Тестирование',
     visible: () => true,
     items: [
-      { to: '/test-mode', title: 'Режим теста', subtitle: 'проходить / создавать', icon: 'https://cdn-icons-png.flaticon.com/512/1508/1508866.png' }
+      { to: '/test-mode', title: 'Режим теста', subtitle: 'проходить / создавать', icon: 'https://cdn-icons-png.flaticon.com/512/1508/1508866.png' },
+      {
+        to: '/student-performance',
+        title: 'Успеваемость',
+        subtitle: 'профиль, тесты, прогресс',
+        icon: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
+        visible: () => isStudent()
+      }
     ]
   },
   {
@@ -49,6 +56,7 @@ const CATEGORIES = [
     label: 'Сервис',
     visible: () => true,
     items: [
+      { to: '/notifications', title: 'Уведомления и дедлайны', subtitle: 'события / сроки', icon: 'https://cdn-icons-png.flaticon.com/512/1827/1827370.png' },
       { to: '/report-error', title: 'Сообщить об ошибке', subtitle: 'тикеты / статус', icon: 'https://cdn-icons-png.flaticon.com/512/3300/3300742.png' }
     ]
   },

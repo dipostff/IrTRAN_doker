@@ -37,14 +37,31 @@ app.use(vuetify);
 app.use(createPinia());
 app.use(router);
 
-// Initialize Keycloak before mounting the app
+// Keycloak: не даём UI зависнуть, если init «подвис» на iframe/cookie
+const KEYCLOAK_MOUNT_TIMEOUT_MS = 18000;
+let appMounted = false;
+function mountAppOnce() {
+  if (appMounted) return;
+  appMounted = true;
+  app.mount('#app');
+}
+
+const watchdog = setTimeout(() => {
+  console.warn(
+    'Keycloak: превышено время ожидания инициализации — открываем приложение. При необходимости обновите страницу или войдите снова.'
+  );
+  mountAppOnce();
+}, KEYCLOAK_MOUNT_TIMEOUT_MS);
+
 initKeycloak()
   .then((authenticated) => {
     console.log('Keycloak initialized, authenticated:', authenticated);
-    app.mount('#app');
+    mountAppOnce();
   })
   .catch((error) => {
     console.error('Failed to initialize Keycloak:', error);
-    // Mount app anyway, but authentication won't work
-app.mount('#app');
+    mountAppOnce();
+  })
+  .finally(() => {
+    clearTimeout(watchdog);
   });

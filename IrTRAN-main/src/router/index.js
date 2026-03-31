@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { isAuthenticated, initKeycloak } from "@/helpers/keycloak";
+import { isAuthenticated, initKeycloak, isPureStudentAccount, isStudent } from "@/helpers/keycloak";
 
 // Initialize Keycloak once; router guard can await this without re-triggering init per navigation.
 const keycloakReady = initKeycloak().catch((e) => {
@@ -244,9 +244,19 @@ const router = createRouter({
             ],
         },
         {
+            path: "/student-performance",
+            name: "student-performance",
+            component: () => import("../views/StudentPerformanceView.vue"),
+        },
+        {
             path: "/report-error",
             name: "report-error",
             component: () => import("../views/ReportErrorView.vue"),
+        },
+        {
+            path: "/notifications",
+            name: "notifications",
+            component: () => import("../views/NotificationsView.vue"),
         },
         {
             path: "/test-mode", // Режим теста: пройти тест, банк заданий, конструктор (всё в одном разделе)
@@ -299,12 +309,14 @@ const PAGE_TITLE = {
     "invoice-menu": "Накладная",
     "invoice-create": "Накладная ",
     "report-error": "Тренажер ЭТРАН - Сообщить об ошибке",
+    notifications: "Тренажер ЭТРАН - Уведомления и дедлайны",
     "test-mode": "Тренажер ЭТРАН - Режим теста",
     reference: "Тренажер ЭТРАН - Справочник",
     scenarios: "Тренажер ЭТРАН - Сценарии",
     "admin-panel": "Тренажер ЭТРАН - Панель управления",
     "teacher-dashboard": "Тренажер ЭТРАН - Панель преподавателя",
     "dictionary-module": "Тренажер ЭТРАН - Заполнение справочников",
+    "student-performance": "Тренажер ЭТРАН - Успеваемость",
 };
 
 // Navigation guard to protect routes
@@ -325,6 +337,10 @@ router.beforeEach(async (to, from, next) => {
 
     // Check authentication for all other routes
     if (authenticated || isAuthenticated()) {
+        if (to.name === 'student-performance' && !isStudent()) {
+            next({ name: 'menu' });
+            return;
+        }
         next();
     } else {
         // Redirect to login if not authenticated
@@ -332,10 +348,62 @@ router.beforeEach(async (to, from, next) => {
     }
 });
 
-router.afterEach((toRoute, fromRoute) => {
+function isNoviceEntryPath(path) {
+    return (
+        path.startsWith("/beginner-scenario") ||
+        path.startsWith("/beginner-simulator") ||
+        path.startsWith("/beginner-instructions")
+    );
+}
+
+function isNoviceSessionExtendedPath(path) {
+    if (isNoviceEntryPath(path)) return true;
+    if (path.startsWith("/transporation")) return true;
+    if (path.startsWith("/invoice")) return true;
+    if (path.startsWith("/act")) return true;
+    if (path.startsWith("/reminder")) return true;
+    if (path.startsWith("/filling-statement")) return true;
+    if (path.startsWith("/cumulative-statement")) return true;
+    if (path.startsWith("/student-performance")) return true;
+    if (path.startsWith("/reference")) return true;
+    return false;
+}
+
+router.afterEach(async (toRoute, fromRoute) => {
     window.document.title = PAGE_TITLE[toRoute.name] ?? "Тренажер ЭТРАН";
     if (toRoute.name === "menu") {
         sessionStorage.removeItem("irtran-training-profile");
+    }
+
+    try {
+        if (!isAuthenticated() || !isPureStudentAccount()) return;
+
+        const { postBeginnerSessionStart, postBeginnerSessionEnd } = await import("@/helpers/API");
+
+        const sid = sessionStorage.getItem("irtran-beginner-sid");
+        const toPath = toRoute.path || "";
+
+        if (sid && !isNoviceSessionExtendedPath(toPath)) {
+            try {
+                await postBeginnerSessionEnd(Number(sid));
+            } catch (e) {
+                console.warn("beginner session end:", e);
+            }
+            sessionStorage.removeItem("irtran-beginner-sid");
+        }
+
+        if (!sessionStorage.getItem("irtran-beginner-sid") && isNoviceEntryPath(toPath)) {
+            try {
+                const r = await postBeginnerSessionStart();
+                if (r && r.id != null) {
+                    sessionStorage.setItem("irtran-beginner-sid", String(r.id));
+                }
+            } catch (e) {
+                console.warn("beginner session start:", e);
+            }
+        }
+    } catch (_) {
+        /* ignore */
     }
 });
 

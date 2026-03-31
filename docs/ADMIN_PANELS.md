@@ -20,6 +20,7 @@
 - `student` — студент;
 - `teacher` — преподаватель;
 - `app-admin` — администратор тренажёра.
+- `dictionary-admin` — администратор раздела «Заполнение справочников».
 
 **Рекомендуемая настройка:**
 
@@ -42,6 +43,9 @@
   - все права преподавателя;
   - доступ к панели `Панель управления` для выдачи ролей (`student`/`teacher`);
   - служебные операции (в т.ч. работа с Keycloak Admin API).
+- **dictionary-admin**:
+  - доступ к модулю `Заполнение справочников`;
+  - не получает автоматически полномочия `teacher`/`app-admin`.
 
 Проверка прав:
 
@@ -53,7 +57,7 @@
   - вспомогательные функции:
     - `hasRealmRole(roleName)`,
     - `hasAnyRealmRole(['teacher', 'app-admin'])`,
-    - `isStudent()`, `isTeacher()`, `isAppAdmin()`.
+    - `isStudent()`, `isTeacher()`, `isAppAdmin()`, `isDictionaryAdmin()`.
 
 ---
 
@@ -175,6 +179,22 @@
    - Обработчик:
      - при нажатии отправляет `POST /api/admin/users/:id/roles` с нужными `add/remove`;
      - после успешного ответа обновляет строку или перезагружает список.
+
+### 2.5. Модерация изменений профиля студента
+
+В `AdminPanelComponent.vue` добавлен блок **«Модерация данных студентов»**:
+
+- просмотр заявок студентов на изменение доп. полей профиля;
+- фильтрация по статусам (`pending`, `approved`, `rejected`, `all`);
+- действия администратора:
+  - одобрить заявку;
+  - отклонить заявку с комментарием.
+
+Backend API:
+
+- `GET /api/admin/student-profile-requests`
+- `POST /api/admin/student-profile-requests/:id/approve`
+- `POST /api/admin/student-profile-requests/:id/reject`
 
 ---
 

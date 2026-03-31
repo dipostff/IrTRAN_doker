@@ -19,42 +19,37 @@ let isInitializing = false;
  * Initialize Keycloak and return a promise
  */
 export function initKeycloak() {
-  // Check if Keycloak is already initialized (check the actual instance state)
-  if (keycloak.authenticated !== undefined || isInitialized) {
-    isInitialized = true;
-    return Promise.resolve(keycloak.authenticated || false);
+  if (isInitialized) {
+    return Promise.resolve(!!keycloak.authenticated);
   }
-  
-  // If initialization is in progress, return the existing promise
+
   if (isInitializing && initPromise) {
     return initPromise;
   }
-  
-  // Prevent multiple initializations
-  if (isInitializing) {
-    return Promise.resolve(false);
-  }
-  
-  // Start initialization
+
   isInitializing = true;
-  initPromise = new Promise((resolve, reject) => {
+  initPromise = new Promise((resolve) => {
     try {
-      keycloak.init({
-        onLoad: 'check-sso',
-        pkceMethod: 'S256',
-        // Avoid full-page redirect loops on refresh by using the silent SSO check page
-        silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
-        // Preserve current route on Keycloak callbacks
-        redirectUri: window.location.href,
-        checkLoginIframe: false,
-        enableLogging: false
-      })
+      keycloak
+        .init({
+          onLoad: 'check-sso',
+          pkceMethod: 'S256',
+          redirectUri: window.location.href,
+          checkLoginIframe: false,
+          enableLogging: false,
+          /**
+           * Без silentCheckSsoRedirectUri keycloak-js не открывает 3rd-party iframe проверки cookie.
+           * С silent URI после logout/смены аккаунта часто: «Timeout when waiting for 3rd party check iframe message»
+           * и вечная загрузка. При check-sso без silent используется redirect с prompt=none.
+           * Тихий SSO: снова задать silentCheckSsoRedirectUri + при необходимости messageReceiveTimeout.
+           */
+          messageReceiveTimeout: 25000
+        })
         .then((authenticated) => {
           isInitialized = true;
           isInitializing = false;
           if (authenticated) {
             console.log('User is authenticated');
-            // Token refresh every 5 minutes (300 seconds)
             setInterval(() => {
               keycloak.updateToken(30).catch(() => {
                 console.error('Failed to refresh token');
@@ -66,20 +61,21 @@ export function initKeycloak() {
           resolve(authenticated);
         })
         .catch((error) => {
+          isInitialized = true;
           isInitializing = false;
-          initPromise = null; // Reset promise on error so we can retry
+          initPromise = null;
           console.error('Keycloak initialization error:', error);
-          // Don't reject, just resolve with false to allow app to continue
           resolve(false);
         });
     } catch (error) {
+      isInitialized = true;
       isInitializing = false;
       initPromise = null;
       console.error('Keycloak initialization exception:', error);
       resolve(false);
     }
   });
-  
+
   return initPromise;
 }
 
@@ -194,6 +190,11 @@ export function isAppAdmin() {
 
 export function isDictionaryAdmin() {
   return hasRealmRole('dictionary-admin');
+}
+
+/** Учебный аккаунт студента без ролей преподавателя и администратора (модуль «Успеваемость»). */
+export function isPureStudentAccount() {
+  return isStudent() && !isTeacher() && !isAppAdmin();
 }
 
 // Export the keycloak instance for advanced usage
