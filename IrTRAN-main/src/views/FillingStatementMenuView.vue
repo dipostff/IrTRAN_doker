@@ -4,6 +4,6 @@ import FillingStatementMenuComponent from '../components/FillingStatementMenuCom
 </script>
 
 <template>
-    <HeaderComponent title="Тренажер ЭТРАН - Ведомость подачи и уборки"/>
+    <HeaderComponent title="Тренажёр ОТРЭД - Ведомость подачи и уборки"/>
     <FillingStatementMenuComponent/>
 </template>

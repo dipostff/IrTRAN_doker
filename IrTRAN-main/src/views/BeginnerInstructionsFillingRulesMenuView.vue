@@ -4,6 +4,6 @@ import BeginnerInstructionsFillingRulesMenuComponent from "../components/Beginne
 </script>
 
 <template>
-  <HeaderComponent title='Тренажер ЭТРАН — Сценарий «Новичок» — Правила заполнения' />
+  <HeaderComponent title='Тренажёр ОТРЭД — Сценарий «Новичок» — Правила заполнения' />
   <BeginnerInstructionsFillingRulesMenuComponent />
 </template>

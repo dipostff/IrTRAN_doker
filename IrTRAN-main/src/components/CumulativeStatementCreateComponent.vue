@@ -8,6 +8,13 @@ import { validateTrainingDocument } from "@/helpers/trainingDocumentValidators";
 import { updateTitle } from "@/helpers/headerHelper";
 import { getLegalEntities, saveStudentDocument, updateStudentDocument } from "@/helpers/API";
 import { getToken } from "@/helpers/keycloak";
+import { applyCoefficientDerivatives, parseNum, fmtNum } from "@/helpers/fillingStatementCalculations";
+import {
+    CUMULATIVE_SOURCE_DOCUMENTS,
+    CUMULATIVE_FEE_ARTICLES,
+    CUMULATIVE_ADDITIONAL_CODES,
+    CUMULATIVE_NDS_OPTIONS,
+} from "@/config/cumulativeStatementCatalogs";
 
 const route = useRoute();
 const router = useRouter();
@@ -18,6 +25,16 @@ const saveError = ref(null);
 const saveSuccess = ref(null);
 
 const placeOptions = [{ id: "ЦФТО", name: "ЦФТО" }];
+const sourceDocumentOptions = CUMULATIVE_SOURCE_DOCUMENTS;
+const feeArticleOptions = CUMULATIVE_FEE_ARTICLES;
+const additionalCodeOptions = CUMULATIVE_ADDITIONAL_CODES;
+const ndsOptions = CUMULATIVE_NDS_OPTIONS;
+
+const selectedFeeRows = ref([]);
+const feeDraft = ref(emptyFeeRow());
+const editingFeeIndex = ref(-1);
+const feeClipboard = ref(null);
+const sourceDocumentChoices = ref([]);
 
 function getDefaultDocument() {
     return {
@@ -32,11 +49,272 @@ function getDefaultDocument() {
         place_of_calculation: "",
         id_payer: null,
         total_to_pay: null,
+        head_signer_name: "",
+        fee_rows: [],
         backendId: null,
     };
 }
 
 const document = ref(getDefaultDocument());
+
+function emptyFeeRow() {
+    return {
+        fee_date: "",
+        source_document_type: "",
+        source_document_number: "",
+        source_document_state: "",
+        fee_article_id: "",
+        additional_code_id: "",
+        note: "",
+        wagon_or_container_number: "",
+        amount_rub: "",
+        amount_kzt: "",
+        nds_option_id: "nds_20",
+        nds_rate: "",
+        nds_amount: "",
+        calculated_amount: "",
+        coeff_safety: "1",
+        coeff_tax: "1",
+        coeff_cap: "1",
+        sum_wo_nonindexed: "",
+        sum_wo_safety: "",
+        sum_wo_tax: "",
+        sum_wo_extra: "",
+        income_safety: "",
+        income_tax: "",
+        income_cap: "",
+    };
+}
+
+function normalizeDocument(raw) {
+    const d = { ...getDefaultDocument(), ...(raw || {}) };
+    d.fee_rows = Array.isArray(raw?.fee_rows) ? raw.fee_rows.map((r) => ({ ...emptyFeeRow(), ...r })) : [];
+    return d;
+}
+
+function readListSafe(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function makeSourceChoice(docType, d) {
+    return {
+        key: `${docType}:${d.id}`,
+        id: String(d.id ?? ""),
+        number: String(d.document_number || d.id || ""),
+        state: d.signed ? "Подписан" : "Черновик",
+        createdAt: d.createdAt || "",
+    };
+}
+
+function reloadSourceDocumentChoices() {
+    const choices = {
+        invoice: readListSafe("invoice_documents").map((d) => makeSourceChoice("invoice", d)),
+        filling_statement: readListSafe("filling_statement_documents").map((d) => makeSourceChoice("filling_statement", d)),
+        reminder: readListSafe("reminder_documents").map((d) => makeSourceChoice("reminder", d)),
+        cumulative_statement: readListSafe("cumulative_statement_documents").map((d) => makeSourceChoice("cumulative_statement", d)),
+        common_act: readListSafe("common_act_documents").map((d) => makeSourceChoice("common_act", d)),
+        commercial_act: readListSafe("commercial_act_documents").map((d) => makeSourceChoice("commercial_act", d)),
+    };
+    sourceDocumentChoices.value = choices;
+}
+
+function getSourceChoicesForType(docType) {
+    if (!docType || !sourceDocumentChoices.value) return [];
+    const list = sourceDocumentChoices.value[docType] || [];
+    return list.filter((x) => matchesCumulativePeriod(x));
+}
+
+function applySelectedSourceDocument() {
+    const list = getSourceChoicesForType(feeDraft.value.source_document_type);
+    const found = list.find((x) => x.id === String(feeDraft.value.source_document_number));
+    feeDraft.value.source_document_state = found?.state || "";
+}
+
+function matchesCumulativePeriod(choice) {
+    const from = document.value.period_from;
+    const to = document.value.period_to;
+    if (!from && !to) return true;
+    if (!choice?.createdAt) return true;
+    const created = String(choice.createdAt).slice(0, 10);
+    if (from && created < from) return false;
+    if (to && created > to) return false;
+    return true;
+}
+
+function selectedCarrier() {
+    return listsStore.legal_entities[document.value.id_carrier_org] || null;
+}
+
+function carrierRailwayDisplay() {
+    const org = selectedCarrier();
+    if (!org) return "";
+    return org.railway || org.railway_code || org.road || org.short_name || "";
+}
+
+function feeArticleById(id) {
+    return feeArticleOptions.find((x) => x.id === id);
+}
+
+function additionalCodeById(id) {
+    return additionalCodeOptions.find((x) => x.id === id);
+}
+
+function ndsById(id) {
+    return ndsOptions.find((x) => x.id === id) || ndsOptions[0];
+}
+
+function recalcFeeDraftAmounts() {
+    if (!feeDraft.value) return;
+    const rate = ndsById(feeDraft.value.nds_option_id).rate;
+    const base = parseNum(feeDraft.value.amount_rub);
+    feeDraft.value.nds_rate = String(rate);
+    feeDraft.value.nds_amount = fmtNum((base * rate) / 100);
+    feeDraft.value.calculated_amount = fmtNum(base + parseNum(feeDraft.value.nds_amount));
+}
+
+function recalcFeeDraftDerivatives() {
+    if (!feeDraft.value) return;
+    applyCoefficientDerivatives(
+        {
+            coeff_safety: feeDraft.value.coeff_safety,
+            coeff_tax: feeDraft.value.coeff_tax,
+            coeff_cap: feeDraft.value.coeff_cap,
+            sum_payment_wo_nonindexed: feeDraft.value.sum_wo_nonindexed,
+            sum_wo_safety: feeDraft.value.sum_wo_safety,
+            sum_wo_tax: feeDraft.value.sum_wo_tax,
+            sum_wo_extra: feeDraft.value.sum_wo_extra,
+            income_safety: feeDraft.value.income_safety,
+            income_tax: feeDraft.value.income_tax,
+            income_cap: feeDraft.value.income_cap,
+        },
+        parseNum(feeDraft.value.calculated_amount)
+    );
+    const t = {
+        coeff_safety: feeDraft.value.coeff_safety,
+        coeff_tax: feeDraft.value.coeff_tax,
+        coeff_cap: feeDraft.value.coeff_cap,
+        sum_payment_wo_nonindexed: "",
+        sum_wo_safety: "",
+        sum_wo_tax: "",
+        sum_wo_extra: "",
+        income_safety: "",
+        income_tax: "",
+        income_cap: "",
+    };
+    applyCoefficientDerivatives(t, parseNum(feeDraft.value.calculated_amount));
+    feeDraft.value.sum_wo_nonindexed = t.sum_payment_wo_nonindexed;
+    feeDraft.value.sum_wo_safety = t.sum_wo_safety;
+    feeDraft.value.sum_wo_tax = t.sum_wo_tax;
+    feeDraft.value.sum_wo_extra = t.sum_wo_extra;
+    feeDraft.value.income_safety = t.income_safety;
+    feeDraft.value.income_tax = t.income_tax;
+    feeDraft.value.income_cap = t.income_cap;
+}
+
+function recalcTotalToPay() {
+    let total = 0;
+    document.value.fee_rows.forEach((r) => {
+        total += parseNum(r.calculated_amount);
+    });
+    document.value.total_to_pay = fmtNum(total);
+}
+
+function isFeeRowSelected(i) {
+    return selectedFeeRows.value.includes(i);
+}
+
+function onFeeRowCheckbox(i, e) {
+    const checked = e.target.checked;
+    if (checked && !selectedFeeRows.value.includes(i)) selectedFeeRows.value.push(i);
+    if (!checked) selectedFeeRows.value = selectedFeeRows.value.filter((x) => x !== i);
+}
+
+function openFeeModal(isNew) {
+    reloadSourceDocumentChoices();
+    editingFeeIndex.value = -1;
+    if (isNew) {
+        feeDraft.value = emptyFeeRow();
+        showModalById("AddSbor");
+        return;
+    }
+    if (selectedFeeRows.value.length !== 1) {
+        alert("Выберите одну строку для изменения.");
+        return;
+    }
+    editingFeeIndex.value = selectedFeeRows.value[0];
+    feeDraft.value = { ...emptyFeeRow(), ...document.value.fee_rows[editingFeeIndex.value] };
+    applySelectedSourceDocument();
+    showModalById("AddSbor");
+}
+
+function applyFeeModal() {
+    if (!feeDraft.value) return;
+    recalcFeeDraftAmounts();
+    recalcFeeDraftDerivatives();
+    const row = { ...emptyFeeRow(), ...feeDraft.value };
+    if (editingFeeIndex.value >= 0) document.value.fee_rows[editingFeeIndex.value] = row;
+    else document.value.fee_rows.push(row);
+    recalcTotalToPay();
+    hideModalById("AddSbor");
+}
+
+function removeFeeRows() {
+    if (!selectedFeeRows.value.length) return;
+    [...selectedFeeRows.value]
+        .sort((a, b) => b - a)
+        .forEach((i) => document.value.fee_rows.splice(i, 1));
+    selectedFeeRows.value = [];
+    recalcTotalToPay();
+}
+
+function copyFeeRow() {
+    if (selectedFeeRows.value.length !== 1) {
+        alert("Выберите одну строку для копирования.");
+        return;
+    }
+    feeClipboard.value = { ...document.value.fee_rows[selectedFeeRows.value[0]] };
+}
+
+function pasteFeeRow() {
+    if (!feeClipboard.value) return;
+    document.value.fee_rows.push({ ...emptyFeeRow(), ...feeClipboard.value });
+    recalcTotalToPay();
+}
+
+function showFormula() {
+    alert("Формула расчета: Расчетная сумма = Сумма сбора + Сумма НДС; Сумма НДС = Сумма сбора * Ставка НДС / 100.");
+}
+
+function showModalById(id) {
+    const el = window.document.getElementById(id);
+    if (!el || typeof bootstrap === "undefined" || !bootstrap.Modal) return;
+    const Modal = bootstrap.Modal;
+    let inst = null;
+    if (typeof Modal.getOrCreateInstance === "function") inst = Modal.getOrCreateInstance(el);
+    if (!inst) inst = new Modal(el);
+    inst.show();
+}
+
+function hideModalById(id) {
+    const el = window.document.getElementById(id);
+    if (!el) return;
+    if (typeof bootstrap !== "undefined" && bootstrap.Modal) {
+        const Modal = bootstrap.Modal;
+        let inst = null;
+        if (typeof Modal.getInstance === "function") inst = Modal.getInstance(el);
+        if (!inst && typeof Modal.getOrCreateInstance === "function") inst = Modal.getOrCreateInstance(el);
+        if (!inst) inst = new Modal(el);
+        if (inst) inst.hide();
+    }
+    window.document.body.classList.remove("modal-open");
+    window.document.querySelectorAll(".modal-backdrop").forEach((b) => b.remove());
+}
 
 function getStoredList() {
     try {
@@ -61,7 +339,7 @@ async function saveDocument() {
     }
     try {
         const list = getStoredList();
-        const doc = { ...document.value };
+        const doc = normalizeDocument({ ...document.value });
         if (!doc.id) {
             doc.id = Date.now().toString();
             doc.createdAt = new Date().toISOString();
@@ -72,7 +350,7 @@ async function saveDocument() {
             else list.push(doc);
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-        document.value = { ...doc };
+        document.value = normalizeDocument(doc);
         if (getToken()) {
             try {
                 const payload = { ...document.value };
@@ -120,7 +398,7 @@ function spoilDocument() {
         const list = getStoredList().filter((d) => d.id !== id);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
     }
-    document.value = getDefaultDocument();
+    document.value = normalizeDocument(getDefaultDocument());
     updateTitle("Накопительная ведомость (Новый документ)");
     router.push("/cumulative-statement/menu");
 }
@@ -129,15 +407,19 @@ function loadDocumentById(id) {
     const list = getStoredList();
     const found = list.find((d) => d.id === id);
     if (found) {
-        document.value = { ...getDefaultDocument(), ...found };
+        document.value = normalizeDocument({ ...getDefaultDocument(), ...found });
         updateTitle("Накопительная ведомость № " + id);
     }
 }
 
 onMounted(async () => {
     await getLegalEntities();
+    reloadSourceDocumentChoices();
     if (route.params.id) loadDocumentById(route.params.id);
-    else updateTitle("Накопительная ведомость (Новый документ)");
+    else {
+        document.value = normalizeDocument(getDefaultDocument());
+        updateTitle("Накопительная ведомость (Новый документ)");
+    }
 });
 </script>
 
@@ -208,7 +490,7 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <select-with-search title="Организация перевозчика" :values="listsStore.legal_entities" valueKey="id" name="name" v-model="document.id_carrier_org" modalName="CumCarrier" :fields="{ 'Код ОКПО': 'OKPO', 'Наименование': 'name', 'ИД бизнеса': 'id_business', 'ИД холдинга': 'id_holding' }" />
-                    <disable-simple-input title="ж.д." :dis="true" :value="''" :fixWidth="false" styleInput="width: 80px" />
+                    <disable-simple-input title="ж.д." :dis="true" :value="carrierRailwayDisplay()" :fixWidth="false" styleInput="width: 120px" />
                 </div>
 
                 <div class="row mb-1">
@@ -237,11 +519,11 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#AddSbor">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
-                        <button type="button" class="btn btn-custom">Копировать</button>
-                        <button type="button" class="btn btn-custom">Вставить</button>
+                        <button type="button" class="btn btn-custom" @click="openFeeModal(true)">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openFeeModal(false)">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeFeeRows">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="copyFeeRow">Копировать</button>
+                        <button type="button" class="btn btn-custom" @click="pasteFeeRow">Вставить</button>
                         <button type="button" class="btn btn-custom" disabled>Данные из актов</button>
                     </div>
                 </div>
@@ -269,22 +551,23 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(row, idx) in document.fee_rows" :key="'fee' + idx">
+                                        <td><input type="checkbox" :checked="isFeeRowSelected(idx)" @change="onFeeRowCheckbox(idx, $event)" /></td>
+                                        <td>{{ row.fee_date }}</td>
+                                        <td>{{ sourceDocumentOptions.find((x) => x.id === row.source_document_type)?.name || row.source_document_type }}</td>
+                                        <td>{{ row.source_document_number }}</td>
+                                        <td>{{ row.source_document_state }}</td>
+                                        <td>{{ feeArticleById(row.fee_article_id)?.code || "" }}</td>
+                                        <td>{{ feeArticleById(row.fee_article_id)?.name || "" }}</td>
+                                        <td>{{ row.note }}</td>
+                                        <td>{{ row.wagon_or_container_number }}</td>
+                                        <td>{{ row.amount_rub }}</td>
+                                        <td>{{ row.amount_kzt }}</td>
+                                        <td>{{ ndsById(row.nds_option_id).name }}</td>
+                                        <td>{{ row.nds_amount }}</td>
+                                        <td>{{ row.nds_rate }}</td>
                                     </tr>
+                                    <tr v-if="!document.fee_rows?.length"><td colspan="14" class="text-muted text-center py-2">Нет строк сборов.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -301,7 +584,7 @@ onMounted(async () => {
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">ФИО руководителя, подписывающего документ</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" placeholder="" />
+                        <input type="text" class="form-control mt-0 custom-input" placeholder="" v-model="document.head_signer_name" />
                     </div>
                 </div>
 
@@ -317,7 +600,7 @@ onMounted(async () => {
                             <div class="modal-body">
                                 <div class="row mb-3">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
+                                        <button type="button" class="btn btn-custom" @click="applyFeeModal">Применить</button>
                                         <button type="button" class="btn btn-custom" data-dismiss="modal">Отменить</button>
                                     </div>
                                 </div>
@@ -325,41 +608,47 @@ onMounted(async () => {
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Дата сбора</label>
                                     <div class="col-auto">
-                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" />
+                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" v-model="feeDraft.fee_date" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Наименование документа</label>
                                     <div class="col-3">
-                                        <select class="form-select mt-0 custom-input">
+                                        <select class="form-select mt-0 custom-input" v-model="feeDraft.source_document_type">
                                             <option value="">Выберете элемент списка</option>
-                                            <option value="Накладная">Накладная</option>
-                                            <option value="Ведомость подачи и уборки">Ведомость подачи и уборки</option>
+                                            <option v-for="d in sourceDocumentOptions" :key="d.id" :value="d.id">{{ d.name }}</option>
                                         </select>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Номер документа</label>
-                                    <div class="col-auto">
-                                        <div class="input-group" style="width: 270px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#NomerDocumenta">
-                                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                                            </button>
-                                        </div>
+                                    <div class="col-auto" style="width: 280px">
+                                        <select
+                                            class="form-select mt-0 custom-input"
+                                            v-model="feeDraft.source_document_number"
+                                            @change="applySelectedSourceDocument"
+                                        >
+                                            <option value="">Выберите документ</option>
+                                            <option
+                                                v-for="doc in getSourceChoicesForType(feeDraft.source_document_type)"
+                                                :key="doc.key"
+                                                :value="doc.id"
+                                            >
+                                                {{ doc.number }} ({{ doc.state }})
+                                            </option>
+                                        </select>
                                     </div>
-
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Ид*</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" placeholder="" disabled="disabled" />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" :value="feeDraft.source_document_number" disabled="disabled" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Состояние документа</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" placeholder="" disabled="disabled" />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" :value="feeDraft.source_document_state" disabled="disabled" />
                                     </div>
                                 </div>
 
@@ -367,7 +656,10 @@ onMounted(async () => {
                                     <label class="col-auto col-form-label mb-0 label-custom">Статья сбора</label>
                                     <div class="col-auto">
                                         <div class="input-group" style="width: 478px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
+                                            <select class="form-select mt-0 custom-input" v-model="feeDraft.fee_article_id">
+                                                <option value="">Выберите статью</option>
+                                                <option v-for="a in feeArticleOptions" :key="a.id" :value="a.id">{{ a.code }} - {{ a.name }}</option>
+                                            </select>
                                             <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#StatiaSbora">
                                                 <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
                                             </button>
@@ -376,17 +668,16 @@ onMounted(async () => {
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Код статьи</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" placeholder="" disabled="disabled" />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" :value="feeArticleById(feeDraft.fee_article_id)?.code || ''" disabled="disabled" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Признак НДС</label>
                                     <div class="col-3">
-                                        <select class="form-select mt-0 custom-input" >
+                                        <select class="form-select mt-0 custom-input" v-model="feeDraft.nds_option_id">
                                             <option value="">Выберете элемент списка</option>
-                                            <option value="">С НДС 20%</option>
-                                            <option value="">Без НДС</option>
+                                            <option v-for="n in ndsOptions" :key="n.id" :value="n.id">{{ n.name }}</option>
                                         </select>
                                     </div>
                                 </div>
@@ -395,7 +686,10 @@ onMounted(async () => {
                                     <label class="col-auto col-form-label mb-0 label-custom">Дополнительный код</label>
                                     <div class="col-auto">
                                         <div class="input-group" style="width: 270px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
+                                            <select class="form-select mt-0 custom-input" v-model="feeDraft.additional_code_id">
+                                                <option value="">Выберите код</option>
+                                                <option v-for="c in additionalCodeOptions" :key="c.id" :value="c.id">{{ c.code }} - {{ c.name }}</option>
+                                            </select>
                                             <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#DopKod">
                                                 <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
                                             </button>
@@ -404,14 +698,14 @@ onMounted(async () => {
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Код</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" placeholder="" disabled="disabled" />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 120px" :value="additionalCodeById(feeDraft.additional_code_id)?.code || ''" disabled="disabled" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Рассчетная сумма</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.calculated_amount" disabled />
                                     </div>
                                 </div>
 
@@ -419,31 +713,31 @@ onMounted(async () => {
                                     <label class="col-auto col-form-label mb-0 label-custom">Сумма сбора</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder="" />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder="" v-model="feeDraft.amount_rub" />
                                     </div>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled :value="feeDraft.amount_kzt" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Ставка НДС</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled/>
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled :value="feeDraft.nds_rate" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Сумма НДС</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled :value="feeDraft.nds_amount" />
                                     </div>
 
                                      <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Расчет</button>
+                                        <button type="button" class="btn btn-custom" @click="recalcFeeDraftAmounts">Расчет</button>
                                     </div>
 
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom" disabled>Формула расчетов</button>
+                                        <button type="button" class="btn btn-custom" @click="showFormula">Формула расчетов</button>
                                     </div>
                                 </div>
 
@@ -451,23 +745,23 @@ onMounted(async () => {
                                     <label class="col-auto col-form-label mb-0 label-custom">Коэф. надбавки на безопаность</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder=""  />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder="" v-model="feeDraft.coeff_safety" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Коэф. надбавки на компенсацию налогов</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder=""  />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder="" v-model="feeDraft.coeff_tax" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Коэф. надбавки на кап. ремонт</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder=""  />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 100px" placeholder="" v-model="feeDraft.coeff_cap" />
                                     </div>
 
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Расчет</button>
+                                        <button type="button" class="btn btn-custom" @click="recalcFeeDraftDerivatives">Расчет</button>
                                     </div>
                                 </div>
 
@@ -475,25 +769,25 @@ onMounted(async () => {
                                     <label class="col-auto col-form-label mb-0 label-custom">Сумма без неиндек. части тарифа</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.sum_wo_nonindexed" disabled />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Сумма без коэф. на безопасность</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.sum_wo_safety" disabled />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Сумма без коэф. на налог</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.sum_wo_tax" disabled />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Сумма без доп коэф.</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.sum_wo_extra" disabled />
                                     </div>
                                 </div>
 
@@ -501,19 +795,19 @@ onMounted(async () => {
                                     <label class="col-auto col-form-label mb-0 label-custom">Доход от надбавки на обесп. безопасности</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.income_safety" disabled />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Доход от надбавки на компенсацию налогов</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.income_tax" disabled />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Доход от надбавки на кап. ремонт</label>
 
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" :value="feeDraft.income_cap" disabled />
                                     </div>
                                 </div>
 
@@ -521,7 +815,7 @@ onMounted(async () => {
                                     <label class="col-auto col-form-label mb-0 label-custom">Примечание</label>
 
                                     <div class="col-10">
-                                        <input type="text" class="form-control mt-0 custom-input" style="min-width: 100%" />
+                                        <input type="text" class="form-control mt-0 custom-input" style="min-width: 100%" v-model="feeDraft.note" />
                                     </div>
                                 </div>
                             </div>

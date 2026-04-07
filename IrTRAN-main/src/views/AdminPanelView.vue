@@ -8,7 +8,7 @@ import { isAppAdmin } from '@/helpers/keycloak';
 const hasAccess = ref(false);
 
 onMounted(() => {
-  updateTitle('Тренажер ЭТРАН - Панель управления');
+  updateTitle('Тренажёр ОТРЭД - Панель управления');
   hasAccess.value = isAppAdmin();
 });
 </script>

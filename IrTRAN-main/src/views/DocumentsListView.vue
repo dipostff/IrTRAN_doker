@@ -4,6 +4,6 @@ import DocumentsListComponent from "../components/DocumentsListComponent.vue";
 </script>
 
 <template>
-    <HeaderComponent title="Тренажер ЭТРАН - Загрузка и выгрузка документов" />
+    <HeaderComponent title="Тренажёр ОТРЭД - Загрузка и выгрузка документов" />
     <DocumentsListComponent />
 </template>

@@ -8,6 +8,7 @@ import { validateTrainingDocument } from "@/helpers/trainingDocumentValidators";
 import { updateTitle } from "@/helpers/headerHelper";
 import { getStations, getSpeedTypes, saveStudentDocument, updateStudentDocument } from "@/helpers/API";
 import { getToken } from "@/helpers/keycloak";
+import { commercialActDefaultDocument, useCommercialActForm } from "@/composables/useCommercialActForm";
 
 const route = useRoute();
 const router = useRouter();
@@ -18,20 +19,56 @@ const saveError = ref(null);
 const saveSuccess = ref(null);
 
 function getDefaultDocument() {
-    return {
-        id: null,
-        signed: false,
-        train_number: "",
-        arrival_date: new Date().toISOString().split("T")[0],
-        arrival_time: "12:00",
-        id_speed_type: null,
-        accompaniment: false,
-        invoice_number: "",
-        backendId: null,
-    };
+    return commercialActDefaultDocument();
 }
 
 const document = ref(getDefaultDocument());
+
+const {
+    senderMarkSearch,
+    actNumberSearch,
+    demoWagonSearch,
+    demoContainerSearch,
+    filteredSenderMarks,
+    filteredActNumbers,
+    filteredDemoWagons,
+    filteredDemoContainers,
+    selectedWagons,
+    selectedContainers,
+    selectedZpu,
+    selectedCargoDocs,
+    selectedCargoActual,
+    wagonDraft,
+    containerDraft,
+    zpuDraft,
+    cargoDocDraft,
+    cargoActDraft,
+    ZPU_TYPE_OPTIONS,
+    ZPU_OWNERSHIP_OPTIONS,
+    openSenderMarkModal,
+    pickSenderMark,
+    openActNumberModal,
+    pickActNumber,
+    openWagonModal,
+    applyWagonModal,
+    removeWagons,
+    openDemoWagonPicker,
+    pickDemoWagon,
+    openContainerModal,
+    applyContainerModal,
+    removeContainers,
+    openDemoContainerPicker,
+    pickDemoContainer,
+    openZpuModal,
+    applyZpuModal,
+    removeZpuRows,
+    openCargoDocModal,
+    applyCargoDocModal,
+    removeCargoDocs,
+    openCargoActModal,
+    applyCargoActModal,
+    removeCargoActual,
+} = useCommercialActForm(document, saveError);
 
 function getStoredList() {
     try {
@@ -304,107 +341,98 @@ onMounted(async () => {
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Станция отправления</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.station_departure" />
                     </div>
 
                     <label class="col-auto col-form-label mb-0 label-custom">Станция назначения</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.station_destination" />
                     </div>
                 </div>
 
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Отправитель</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.shipper_name" />
                     </div>
 
                     <label class="col-auto col-form-label mb-0 label-custom">Код ОКПО</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 150px" disabled />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 150px" v-model="document.shipper_okpo" />
                     </div>
                 </div>
 
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Получатель</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.receiver_name" />
                     </div>
 
                     <label class="col-auto col-form-label mb-0 label-custom">Код ОКПО</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 150px" disabled />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 150px" v-model="document.receiver_okpo" />
                     </div>
                 </div>
 
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Перевозчик</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.carrier_name" />
                     </div>
                 </div>
 
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Отметки отправителя о состоянии тары или груза</label>
-
                     <div class="col-auto">
                         <div class="input-group" style="width: 450px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#OtmetkioSostoinii">
+                            <input type="text" class="form-control custom-search" v-model="document.sender_tare_marks" placeholder="Выберите из справочника" readonly />
+                            <button class="btn btn-outline-secondary" type="button" @click="openSenderMarkModal()">
                                 <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
                             </button>
                         </div>
                     </div>
                 </div>
+                <p class="small text-muted">Справочник учебный (типовые формулировки); при необходимости пополняется в конфигурации actTrainingCatalogs.</p>
 
                 <!--Найти Отметки отправителя о состоянии тары или груза модальное окно -->
-                <div class="modal fade" id="OtmetkioSostoinii" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                <div class="modal fade" id="OtmetkioSostoinii" data-backdrop="static" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-lg">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
-                                <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; font-weight: bold">Отметки отправителя о состоянии тары или груза</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <span class="modal-title text-center" style="color: white; font-weight: bold">Отметки отправителя о состоянии тары или груза</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
                             </div>
                             <div class="modal-body">
-                                <div class="row justify-content-md-center mb-2">
+                                <div class="row mb-2">
                                     <div class="col-12">
-                                        <div class="input-group">
-                                            <input type="text" class="form-control" id="clearimput" placeholder="Поиск" aria-label="Поиск" />
-                                            <div class="input-group-append">
-                                                <button class="btn btn-outline-secondary" type="button" id="clearButton">
-                                                    <font-awesome-icon icon="fa-solid fa-xmark" />
-                                                </button>
-                                                <button class="btn btn-outline-secondary" type="button">
-                                                    <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <input type="text" class="form-control" v-model="senderMarkSearch" placeholder="Поиск по коду или описанию" />
                                     </div>
                                 </div>
-                                <div class="table-responsive" style="border: #c1c1c1 solid 1px; padding-bottom: 200px">
-                                    <table class="table table-hover table-bordered border-white">
+                                <div class="table-responsive" style="border: #c1c1c1 solid 1px; max-height: 320px; overflow: auto">
+                                    <table class="table table-hover table-bordered border-white table-sm">
                                         <thead style="background-color: #7da5f0; color: white">
                                             <tr>
-                                                <th>Номер отметки</th>
+                                                <th>Код</th>
                                                 <th>Описание</th>
-                                                <th>Отметки</th>
                                                 <th>Примечание</th>
                                             </tr>
                                         </thead>
-                                        <tbody class="table-group-divider">
-                                            <tr>
-                                                <td></td>
-                                                <td></td>
-                                                <td></td>
-                                                <td></td>
+                                        <tbody>
+                                            <tr
+                                                v-for="row in filteredSenderMarks"
+                                                :key="'sm' + row.id"
+                                                style="cursor: pointer"
+                                                @click="pickSenderMark(row)"
+                                            >
+                                                <td>{{ row.code }}</td>
+                                                <td>{{ row.description }}</td>
+                                                <td>{{ row.note }}</td>
                                             </tr>
                                         </tbody>
                                     </table>
                                 </div>
-
-                                <div class="row justify-content-md-end">
-                                    <button type="button" class="btn btn-custom" style="width: 70px; margin: 10px">Да</button>
-                                    <button type="button" class="btn btn-custom" data-dismiss="modal" style="width: 70px; margin: 10px">Нет</button>
+                                <div class="row justify-content-md-end mt-2">
+                                    <button type="button" class="btn btn-custom" data-bs-dismiss="modal" data-dismiss="modal">Закрыть</button>
                                 </div>
                             </div>
                         </div>
@@ -415,14 +443,14 @@ onMounted(async () => {
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Объявленная ценность</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.declared_value" />
                     </div>
                 </div>
 
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Груз погружен средствами</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.cargo_loaded_means" />
                     </div>
 
                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">масса груза при погрузке определена</label>
@@ -431,12 +459,12 @@ onMounted(async () => {
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Кем</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.loaded_by_whom" />
                     </div>
 
                     <label class="col-auto col-form-label mb-0 label-custom">Каким способом</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" />
+                        <input type="text" class="form-control mt-0 custom-input" style="width: 450px" v-model="document.loaded_how" />
                     </div>
                 </div>
 
@@ -447,9 +475,9 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#VagonizOtpr">Добавить</button>
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#VagonizOtpr">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="openWagonModal(true)">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openWagonModal(false)">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeWagons">Удалить</button>
                     </div>
                 </div>
 
@@ -469,14 +497,17 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(w, idx) in document.commercial_wagons" :key="'cw' + idx">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedWagons" /></td>
+                                        <td>{{ w.wagon_number }}</td>
+                                        <td>{{ w.stock_type }}</td>
+                                        <td>{{ w.capacity }}</td>
+                                        <td>{{ w.condition }}</td>
+                                        <td>{{ w.tech_act }}{{ w.tech_act_date ? " от " + w.tech_act_date : "" }}</td>
+                                        <td>{{ w.ownership }}</td>
+                                    </tr>
+                                    <tr v-if="!document.commercial_wagons?.length">
+                                        <td colspan="7" class="text-muted small px-2">Нет строк.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -485,28 +516,27 @@ onMounted(async () => {
                 </div>
 
                 <!--Вагоны из отправки модальное окно -->
-                <div class="modal fade bd-example-modal-lg" id="VagonizOtpr" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                <div class="modal fade bd-example-modal-lg" id="VagonizOtpr" data-backdrop="static" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-lg" style="max-width: 70%">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
-                                <span class="modal-title text-center col-auto" id="staticBackdropLabel" style="color: white; font-weight: bold">Вагоны</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <span class="modal-title text-center col-auto" style="color: white; font-weight: bold">Вагоны</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-3">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
-                                        <button type="button" class="btn btn-custom">Отменить</button>
+                                        <button type="button" class="btn btn-custom" @click="applyWagonModal">Применить</button>
+                                        <button type="button" class="btn btn-custom" data-bs-dismiss="modal" data-dismiss="modal">Отменить</button>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Номер вагона</label>
-
                                     <div class="col-auto">
                                         <div class="input-group" style="width: 270px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#NomerVagona">
+                                            <input type="text" class="form-control custom-search" v-model="wagonDraft.wagon_number" />
+                                            <button class="btn btn-outline-secondary" type="button" @click="openDemoWagonPicker">
                                                 <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
                                             </button>
                                         </div>
@@ -514,38 +544,38 @@ onMounted(async () => {
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Род вагона</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="wagonDraft.stock_type" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Грузоподъемность</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="wagonDraft.capacity" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Принадлежность</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="wagonDraft.ownership" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Состояние</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="wagonDraft.condition" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Технический акт номер</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="wagonDraft.tech_act" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Дата</label>
                                     <div class="col-auto">
-                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" />
+                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" v-model="wagonDraft.tech_act_date" />
                                     </div>
                                 </div>
                             </div>
@@ -553,6 +583,41 @@ onMounted(async () => {
                     </div>
                 </div>
                 <!----------------------------- -->
+
+                <div class="modal fade" id="CommercialActDemoWagonPicker" data-backdrop="static" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header" style="background-color: #7da5f0">
+                                <span class="modal-title text-center" style="color: white; font-weight: bold">Демо-справочник вагонов</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="text" class="form-control mb-2" v-model="demoWagonSearch" placeholder="Поиск" />
+                                <div class="table-responsive" style="max-height: 280px; overflow: auto; border: 1px solid #c1c1c1">
+                                    <table class="table table-sm table-hover">
+                                        <thead style="background-color: #7da5f0; color: white">
+                                            <tr>
+                                                <th>Номер</th>
+                                                <th>Род</th>
+                                                <th>Г/п</th>
+                                                <th>Принадлежность</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="(w, i) in filteredDemoWagons" :key="'dw' + i" style="cursor: pointer" @click="pickDemoWagon(w)">
+                                                <td>{{ w.number }}</td>
+                                                <td>{{ w.shortName }}</td>
+                                                <td>{{ w.capacity }}</td>
+                                                <td>{{ w.ownership }}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <button type="button" class="btn btn-custom mt-2" data-bs-dismiss="modal" data-dismiss="modal">Закрыть</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <!------------------------------------------------------------------------------------------------------------------------------------------------>
 
@@ -563,9 +628,9 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#ConteinerizOtpr">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="openContainerModal(true)">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openContainerModal(false)">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeContainers">Удалить</button>
                     </div>
                 </div>
 
@@ -584,13 +649,16 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(c, idx) in document.commercial_containers" :key="'cc' + idx">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedContainers" /></td>
+                                        <td>{{ c.container_number }}</td>
+                                        <td>{{ c.size_type }}</td>
+                                        <td>{{ c.ownership }}</td>
+                                        <td>{{ c.condition }}</td>
+                                        <td>{{ c.tech_act }}{{ c.tech_act_date ? " от " + c.tech_act_date : "" }}</td>
+                                    </tr>
+                                    <tr v-if="!document.commercial_containers?.length">
+                                        <td colspan="6" class="text-muted small px-2">Нет строк.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -599,28 +667,27 @@ onMounted(async () => {
                 </div>
 
                 <!--Контейнеры из отправки модальное окно -->
-                <div class="modal fade bd-example-modal-lg" id="ConteinerizOtpr" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                <div class="modal fade bd-example-modal-lg" id="ConteinerizOtpr" data-backdrop="static" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-lg" style="max-width: 70%">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
-                                <span class="modal-title text-center col-auto" id="staticBackdropLabel" style="color: white; font-weight: bold">Контейнеры</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <span class="modal-title text-center col-auto" style="color: white; font-weight: bold">Контейнеры</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-3">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
-                                        <button type="button" class="btn btn-custom">Отменить</button>
+                                        <button type="button" class="btn btn-custom" @click="applyContainerModal">Применить</button>
+                                        <button type="button" class="btn btn-custom" data-bs-dismiss="modal" data-dismiss="modal">Отменить</button>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Номер контейнера</label>
-
                                     <div class="col-auto">
                                         <div class="input-group" style="width: 270px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#NomerKonteinera">
+                                            <input type="text" class="form-control custom-search" v-model="containerDraft.container_number" />
+                                            <button class="btn btn-outline-secondary" type="button" @click="openDemoContainerPicker">
                                                 <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
                                             </button>
                                         </div>
@@ -628,33 +695,33 @@ onMounted(async () => {
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Типоразмер</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="containerDraft.size_type" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Принадлежность</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="containerDraft.ownership" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Состояние</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="containerDraft.condition" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Технический акт номер</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="containerDraft.tech_act" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom">Дата</label>
                                     <div class="col-auto">
-                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" />
+                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" v-model="containerDraft.tech_act_date" />
                                     </div>
                                 </div>
                             </div>
@@ -662,6 +729,39 @@ onMounted(async () => {
                     </div>
                 </div>
                 <!----------------------------- -->
+
+                <div class="modal fade" id="CommercialActDemoContainerPicker" data-backdrop="static" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header" style="background-color: #7da5f0">
+                                <span class="modal-title text-center" style="color: white; font-weight: bold">Демо-справочник контейнеров</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="text" class="form-control mb-2" v-model="demoContainerSearch" placeholder="Поиск" />
+                                <div class="table-responsive" style="max-height: 280px; overflow: auto; border: 1px solid #c1c1c1">
+                                    <table class="table table-sm table-hover">
+                                        <thead style="background-color: #7da5f0; color: white">
+                                            <tr>
+                                                <th>Номер</th>
+                                                <th>Типоразмер</th>
+                                                <th>Принадлежность</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="(c, i) in filteredDemoContainers" :key="'dc' + i" style="cursor: pointer" @click="pickDemoContainer(c)">
+                                                <td>{{ c.number }}</td>
+                                                <td>{{ c.sizeType }}</td>
+                                                <td>{{ c.ownership }}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <button type="button" class="btn btn-custom mt-2" data-bs-dismiss="modal" data-dismiss="modal">Закрыть</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <!------------------------------------------------------------------------------------------------------------------------------------------------>
 
@@ -672,9 +772,9 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#ZPUizOtpr">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="openZpuModal(true)">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openZpuModal(false)">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeZpuRows">Удалить</button>
                     </div>
                 </div>
 
@@ -695,15 +795,18 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(z, idx) in document.zpu_rows" :key="'zpu' + idx">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedZpu" /></td>
+                                        <td>{{ z.vehicle_ref }}</td>
+                                        <td>{{ z.place }}</td>
+                                        <td>{{ z.ownership }}</td>
+                                        <td>{{ z.type }}</td>
+                                        <td>{{ z.control_marks }}</td>
+                                        <td>{{ z.cancellation }}</td>
+                                        <td>{{ z.damage_traces }}</td>
+                                    </tr>
+                                    <tr v-if="!document.zpu_rows?.length">
+                                        <td colspan="8" class="text-muted small px-2">Нет строк.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -712,69 +815,73 @@ onMounted(async () => {
                 </div>
 
                 <!--ЗПУ из отправки модальное окно -->
-                <div class="modal fade bd-example-modal-lg" id="ZPUizOtpr" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                <div class="modal fade bd-example-modal-lg" id="ZPUizOtpr" data-backdrop="static" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-lg" style="max-width: 70%">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
-                                <span class="modal-title text-center col-auto" id="staticBackdropLabel" style="color: white; font-weight: bold">ЗПУ</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <span class="modal-title text-center col-auto" style="color: white; font-weight: bold">ЗПУ</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-3">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
-                                        <button type="button" class="btn btn-custom">Отменить</button>
+                                        <button type="button" class="btn btn-custom" @click="applyZpuModal">Применить</button>
+                                        <button type="button" class="btn btn-custom" data-bs-dismiss="modal" data-dismiss="modal">Отменить</button>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Номер вагона, контейнера</label>
-
                                     <div class="col-auto">
-                                        <div class="input-group" style="width: 270px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#NomerVagonaorKonteineraZPU">
-                                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                                            </button>
-                                        </div>
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 270px" v-model="zpuDraft.vehicle_ref" placeholder="Вручную или из таблицы вагонов выше" />
                                     </div>
+                                </div>
 
+                                <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: 150px">Место наложения ЗПУ</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="zpuDraft.place" style="width: 270px" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Принадлежность ЗПУ</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <select class="form-select custom-input" style="width: 270px" v-model="zpuDraft.ownership">
+                                            <option value="">Выберите</option>
+                                            <option v-for="o in ZPU_OWNERSHIP_OPTIONS" :key="o.id" :value="o.id">{{ o.name }}</option>
+                                        </select>
                                     </div>
+                                </div>
 
+                                <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: 150px">Тип ЗПУ</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <select class="form-select custom-input" style="width: 270px" v-model="zpuDraft.type">
+                                            <option value="">Выберите</option>
+                                            <option v-for="o in ZPU_TYPE_OPTIONS" :key="o.id" :value="o.id">{{ o.name }}</option>
+                                        </select>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Контрольные знаки</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="zpuDraft.control_marks" style="width: 400px" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Погашение</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="zpuDraft.cancellation" style="width: 400px" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Следы вскрытия или повреждения</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="zpuDraft.damage_traces" style="width: 400px" />
                                     </div>
                                 </div>
                             </div>
@@ -796,9 +903,9 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#GruzpoDoc">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="openCargoDocModal(true)">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openCargoDocModal(false)">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeCargoDocs">Удалить</button>
                     </div>
                 </div>
 
@@ -819,15 +926,18 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(r, idx) in document.cargo_by_docs" :key="'cbd' + idx">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedCargoDocs" /></td>
+                                        <td>{{ r.vehicle_ref }}</td>
+                                        <td>{{ r.brand }}</td>
+                                        <td>{{ r.places_count }}</td>
+                                        <td>{{ r.package_type }}</td>
+                                        <td>{{ r.cargo_name }}</td>
+                                        <td>{{ r.total_mass_kg }}</td>
+                                        <td>{{ r.mass_per_place }}</td>
+                                    </tr>
+                                    <tr v-if="!document.cargo_by_docs?.length">
+                                        <td colspan="8" class="text-muted small px-2">Нет строк.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -836,69 +946,65 @@ onMounted(async () => {
                 </div>
 
                 <!--Груз по документам модальное окно -->
-                <div class="modal fade bd-example-modal-lg" id="GruzpoDoc" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                <div class="modal fade bd-example-modal-lg" id="GruzpoDoc" data-backdrop="static" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-lg" style="max-width: 70%">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
-                                <span class="modal-title text-center col-auto" id="staticBackdropLabel" style="color: white; font-weight: bold">Груз по документам</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <span class="modal-title text-center col-auto" style="color: white; font-weight: bold">Груз по документам</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-3">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
-                                        <button type="button" class="btn btn-custom">Отменить</button>
+                                        <button type="button" class="btn btn-custom" @click="applyCargoDocModal">Применить</button>
+                                        <button type="button" class="btn btn-custom" data-bs-dismiss="modal" data-dismiss="modal">Отменить</button>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Номер вагона, контейнера</label>
-
                                     <div class="col-auto">
-                                        <div class="input-group" style="width: 270px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#NomerVagonaorKonteineraPoDoc">
-                                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                                            </button>
-                                        </div>
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 270px" v-model="cargoDocDraft.vehicle_ref" />
                                     </div>
+                                </div>
 
+                                <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: 150px">Марка</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoDocDraft.brand" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Число мест</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoDocDraft.places_count" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: 150px">Род упаковки</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoDocDraft.package_type" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Наименование груза</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 400px" v-model="cargoDocDraft.cargo_name" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Общая масса в кг</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoDocDraft.total_mass_kg" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Масса одного места при стандартной упаковке</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 400px" v-model="cargoDocDraft.mass_per_place" />
                                     </div>
                                 </div>
                             </div>
@@ -916,9 +1022,9 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#GruzpoDocvDeist">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="openCargoActModal(true)">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openCargoActModal(false)">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeCargoActual">Удалить</button>
                     </div>
                 </div>
 
@@ -940,16 +1046,19 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(r, idx) in document.cargo_actual" :key="'ca' + idx">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedCargoActual" /></td>
+                                        <td>{{ r.vehicle_ref }}</td>
+                                        <td>{{ r.brand }}</td>
+                                        <td>{{ r.places_count }}</td>
+                                        <td>{{ r.package_type }}</td>
+                                        <td>{{ r.cargo_name }}</td>
+                                        <td>{{ r.total_mass_kg }}</td>
+                                        <td>{{ r.mass_per_place }}</td>
+                                        <td>{{ r.damage_note }}</td>
+                                    </tr>
+                                    <tr v-if="!document.cargo_actual?.length">
+                                        <td colspan="9" class="text-muted small px-2">Нет строк.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -958,76 +1067,72 @@ onMounted(async () => {
                 </div>
 
                 <!--Груз в действительности модальное окно -->
-                <div class="modal fade bd-example-modal-lg" id="GruzpoDocvDeist" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                <div class="modal fade bd-example-modal-lg" id="GruzpoDocvDeist" data-backdrop="static" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-lg" style="max-width: 70%">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
-                                <span class="modal-title text-center col-auto" id="staticBackdropLabel" style="color: white; font-weight: bold">Груз в действительности</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <span class="modal-title text-center col-auto" style="color: white; font-weight: bold">Груз в действительности</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-3">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
-                                        <button type="button" class="btn btn-custom">Отменить</button>
+                                        <button type="button" class="btn btn-custom" @click="applyCargoActModal">Применить</button>
+                                        <button type="button" class="btn btn-custom" data-bs-dismiss="modal" data-dismiss="modal">Отменить</button>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Номер вагона, контейнера</label>
-
                                     <div class="col-auto">
-                                        <div class="input-group" style="width: 270px">
-                                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#NomerVagonaorKonteineraVDeist">
-                                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                                            </button>
-                                        </div>
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 270px" v-model="cargoActDraft.vehicle_ref" />
                                     </div>
+                                </div>
 
+                                <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: 150px">Марка</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoActDraft.brand" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Число мест</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoActDraft.places_count" />
                                     </div>
 
                                     <label class="col-auto col-form-label mb-0 label-custom" style="width: 150px">Род упаковки</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoActDraft.package_type" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Наименование груза</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 400px" v-model="cargoActDraft.cargo_name" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Общая масса в кг</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" v-model="cargoActDraft.total_mass_kg" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Масса одного места при стандартной упаковке</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 400px" v-model="cargoActDraft.mass_per_place" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Отметка о повреждении</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" />
+                                        <input type="text" class="form-control mt-0 custom-input" style="width: 400px" v-model="cargoActDraft.damage_note" />
                                     </div>
                                 </div>
                             </div>
@@ -1051,7 +1156,7 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-10">
-                        <input type="text" class="form-control mt-0 custom-input" style="height: 150px; min-width: 100%" />
+                        <textarea class="form-control mt-0 custom-input" style="height: 120px; min-width: 100%" v-model="document.cargo_discrepancy_description" />
                     </div>
                 </div>
 
@@ -1066,8 +1171,8 @@ onMounted(async () => {
                     <label class="col-auto col-form-label mb-0 label-custom">Номер акта</label>
                     <div class="col-auto">
                         <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#NomerAckta">
+                            <input type="text" class="form-control custom-search" v-model="document.expertise_act_number" placeholder="Вручную или из справочника" />
+                            <button class="btn btn-outline-secondary" type="button" @click="openActNumberModal">
                                 <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
                             </button>
                         </div>
@@ -1075,9 +1180,10 @@ onMounted(async () => {
 
                     <label class="col-auto col-form-label mb-0 label-custom" style="width: auto">Дата</label>
                     <div class="col-auto">
-                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" />
+                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" v-model="document.expertise_act_date" />
                     </div>
                 </div>
+                <p class="small text-muted">Номер акта экспертизы: учебный справочник в actTrainingCatalogs (примеры связки с накладной).</p>
 
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0" style="width: auto; font-weight: bold">Заключение</label>
@@ -1085,7 +1191,7 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-10">
-                        <input type="text" class="form-control mt-0 custom-input" style="height: 150px; min-width: 100%" />
+                        <textarea class="form-control mt-0 custom-input" style="height: 120px; min-width: 100%" v-model="document.expertise_conclusion" />
                     </div>
                 </div>
 
@@ -1575,31 +1681,17 @@ onMounted(async () => {
                 <!----------------------------- -->
 
                 <!--Найти Номер акта  модальное окно -->
-                <div class="modal fade" id="NomerAckta" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticBackdropLabel" aria-hidden="true">
+                <div class="modal fade" id="NomerAckta" data-backdrop="static" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-lg">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
-                                <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; font-weight: bold">Номер акта</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <span class="modal-title text-center" style="color: white; font-weight: bold">Номер акта</span>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
                             </div>
                             <div class="modal-body">
-                                <div class="row justify-content-md-center mb-2">
-                                    <div class="col-12">
-                                        <div class="input-group">
-                                            <input type="text" class="form-control" id="clearimput" placeholder="Поиск" aria-label="Поиск" />
-                                            <div class="input-group-append">
-                                                <button class="btn btn-outline-secondary" type="button" id="clearButton">
-                                                    <font-awesome-icon icon="fa-solid fa-xmark" />
-                                                </button>
-                                                <button class="btn btn-outline-secondary" type="button">
-                                                    <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="table-responsive" style="border: #c1c1c1 solid 1px; padding-bottom: 200px">
-                                    <table class="table table-hover table-bordered border-white">
+                                <input type="text" class="form-control mb-2" v-model="actNumberSearch" placeholder="Поиск по номеру, накладной, названию" />
+                                <div class="table-responsive" style="border: #c1c1c1 solid 1px; max-height: 320px; overflow: auto">
+                                    <table class="table table-hover table-bordered border-white table-sm">
                                         <thead style="background-color: #7da5f0; color: white">
                                             <tr>
                                                 <th>Номер акта</th>
@@ -1608,20 +1700,23 @@ onMounted(async () => {
                                                 <th>Примечание</th>
                                             </tr>
                                         </thead>
-                                        <tbody class="table-group-divider">
-                                            <tr>
-                                                <td></td>
-                                                <td></td>
-                                                <td></td>
-                                                <td></td>
+                                        <tbody>
+                                            <tr
+                                                v-for="row in filteredActNumbers"
+                                                :key="'an' + row.id"
+                                                style="cursor: pointer"
+                                                @click="pickActNumber(row)"
+                                            >
+                                                <td>{{ row.number }}</td>
+                                                <td>{{ row.title }}</td>
+                                                <td>{{ row.invoice }}</td>
+                                                <td>{{ row.note }}</td>
                                             </tr>
                                         </tbody>
                                     </table>
                                 </div>
-
-                                <div class="row justify-content-md-end">
-                                    <button type="button" class="btn btn-custom" style="width: 70px; margin: 10px">Да</button>
-                                    <button type="button" class="btn btn-custom" data-dismiss="modal" style="width: 70px; margin: 10px">Нет</button>
+                                <div class="row justify-content-md-end mt-2">
+                                    <button type="button" class="btn btn-custom" data-bs-dismiss="modal" data-dismiss="modal">Закрыть</button>
                                 </div>
                             </div>
                         </div>

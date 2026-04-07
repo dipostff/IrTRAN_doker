@@ -124,7 +124,7 @@ async function startTest(id) {
     surveyModel.value = null;
     currentAttemptId.value = null;
 
-    updateTitle(`Тренажер ЭТРАН - Тест: ${test.name}`);
+    updateTitle(`Тренажёр ОТРЭД - Тест: ${test.name}`);
 
     const token = getToken();
     const response = await axios.get(
@@ -293,7 +293,7 @@ function backToList() {
   surveyModel.value = null;
   showBackButton.value = false;
   wrongAnswersJournal.value = [];
-  updateTitle("Тренажер ЭТРАН - Режим теста");
+  updateTitle("Тренажёр ОТРЭД - Режим теста");
 }
 
 onMounted(() => {

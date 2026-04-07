@@ -10,6 +10,10 @@ export default {
         sendingId: {
             type: Number,
         },
+        resetNonce: {
+            type: Number,
+            default: 0,
+        },
     },
     emits: ["saveSending"],
     data() {
@@ -25,6 +29,13 @@ export default {
         };
     },
     methods: {
+        initSending() {
+            if (this.sendingId && this.listsStore.sendings[this.sendingId]) {
+                this.sending = { ...this.listsStore.sendings[this.sendingId] };
+            } else {
+                this.sending = Sending.getDefaultDocument();
+            }
+        },
         async fetchCargoConstraints() {
             try {
                 const stationId =
@@ -71,17 +82,13 @@ export default {
                 console.error("Не удалось сохранить отправку", saveDoc);
                 return;
             }
-            this.$emit("saveSending", saveDoc.id);
+            this.$emit("saveSending", saveDoc);
         }
     },
     created() {
         this.listsStore = useListsStore();
         this.mainStore = useMainStore();
-        if (this.sendingId) {
-            this.sending = this.listsStore.cargos[this.sendingId];
-        } else {
-            this.sending = Sending.getDefaultDocument();
-        }
+        this.initSending();
     },
     mounted() {},
     computed: {
@@ -116,6 +123,17 @@ export default {
             immediate: true,
             handler() {
                 this.fetchCargoConstraints();
+            }
+        },
+        sendingId: {
+            immediate: true,
+            handler() {
+                this.initSending();
+            }
+        },
+        resetNonce() {
+            if (!this.sendingId) {
+                this.initSending();
             }
         }
     },

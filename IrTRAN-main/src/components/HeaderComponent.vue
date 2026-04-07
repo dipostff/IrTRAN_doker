@@ -24,7 +24,7 @@ function handleLogout() {
         </router-link>
         <div class="title">
             <h5 class="mb-0" style="color: white">
-                <b>{{ mainStore.title ?? "Тренажер ЭТРАН" }}</b>
+                <b>{{ mainStore.title ?? "Тренажёр ОТРЭД" }}</b>
             </h5>
             <span style="background-color: red; color: white;">{{ mainStore.subtitle }}</span>
         </div>

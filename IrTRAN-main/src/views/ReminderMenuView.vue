@@ -4,6 +4,6 @@ import ReminderMenuComponent from "../components/ReminderMenuComponent.vue";
 </script>
 
 <template>
-    <HeaderComponent title="Тренажер ЭТРАН - Памятка приемосдатчика" />
+    <HeaderComponent title="Тренажёр ОТРЭД - Памятка приемосдатчика" />
     <ReminderMenuComponent />
 </template>

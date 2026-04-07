@@ -4,6 +4,6 @@
 </script>
 
 <template>
-    <HeaderComponent title='Тренажер ЭТРАН - Сценарий "Новичок" - Инструкции - Инструкции на заявку по грузоперевозке' />
+    <HeaderComponent title='Тренажёр ОТРЭД - Сценарий "Новичок" - Инструкции - Инструкции на заявку по грузоперевозке' />
     <BeginnerTransporationComponent />
 </template>

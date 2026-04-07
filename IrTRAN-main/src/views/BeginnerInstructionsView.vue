@@ -4,6 +4,6 @@ import BeginnerInstructionsComponent from "../components/BeginnerInstructionsCom
 </script>
 
 <template>
-    <HeaderComponent title='Тренажер ЭТРАН - Сценарий "Новичок" - Инструкции' />
+    <HeaderComponent title='Тренажёр ОТРЭД - Сценарий "Новичок" - Инструкции' />
     <BeginnerInstructionsComponent />
 </template>

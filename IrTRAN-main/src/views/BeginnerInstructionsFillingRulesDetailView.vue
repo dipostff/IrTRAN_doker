@@ -9,8 +9,8 @@ const route = useRoute();
 const title = computed(() => {
   const c = getFillingRulesContent(String(route.params.docType || ""));
   return c?.pageTitle
-    ? `Тренажер ЭТРАН — Правила — ${c.pageTitle}`
-    : 'Тренажер ЭТРАН — Правила заполнения';
+    ? `Тренажёр ОТРЭД — Правила — ${c.pageTitle}`
+    : 'Тренажёр ОТРЭД — Правила заполнения';
 });
 </script>
 

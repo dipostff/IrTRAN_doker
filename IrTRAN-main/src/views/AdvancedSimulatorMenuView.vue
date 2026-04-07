@@ -4,6 +4,6 @@ import AdvancedSimulatorMenuComponent from "../components/AdvancedSimulatorMenuC
 </script>
 
 <template>
-    <HeaderComponent title='Тренажер ЭТРАН - Сценарий обучения "Продвинутый - Тренажер"' />
+    <HeaderComponent title='Тренажёр ОТРЭД - Сценарий обучения "Продвинутый - Тренажер"' />
     <AdvancedSimulatorMenuComponent />
 </template>

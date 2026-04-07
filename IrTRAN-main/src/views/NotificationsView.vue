@@ -4,6 +4,6 @@ import NotificationsComponent from "../components/NotificationsComponent.vue";
 </script>
 
 <template>
-  <HeaderComponent title="Тренажер ЭТРАН - Уведомления и дедлайны" />
+  <HeaderComponent title="Тренажёр ОТРЭД - Уведомления и дедлайны" />
   <NotificationsComponent />
 </template>

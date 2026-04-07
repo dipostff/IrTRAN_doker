@@ -4,6 +4,6 @@ import BeginnerSimulatorMenuComponent from "../components/BeginnerSimulatorMenuC
 </script>
 
 <template>
-    <HeaderComponent title='Тренажер ЭТРАН - Сценарий обучения "Новичок - Тренажер"' />
+    <HeaderComponent title='Тренажёр ОТРЭД - Сценарий обучения "Новичок - Тренажер"' />
     <BeginnerSimulatorMenuComponent />
 </template>

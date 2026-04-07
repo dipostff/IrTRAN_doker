@@ -8,7 +8,7 @@ import { hasAnyRealmRole } from '@/helpers/keycloak';
 const hasAccess = ref(false);
 
 onMounted(() => {
-  updateTitle('Тренажер ЭТРАН - Панель преподавателя');
+  updateTitle('Тренажёр ОТРЭД - Панель преподавателя');
   hasAccess.value = hasAnyRealmRole(['teacher', 'app-admin']);
 });
 </script>

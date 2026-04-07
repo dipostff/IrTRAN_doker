@@ -37,7 +37,7 @@ watch(() => route.query.tab, (q) => {
 });
 
 onMounted(() => {
-  updateTitle('Тренажер ЭТРАН - Режим теста');
+  updateTitle('Тренажёр ОТРЭД - Режим теста');
   if (route.query.tab && ['bank', 'constructor'].includes(route.query.tab) && showTeacherTabs.value) {
     tab.value = route.query.tab;
   }

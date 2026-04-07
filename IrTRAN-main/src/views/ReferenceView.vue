@@ -3,7 +3,7 @@ import HeaderComponent from '../components/HeaderComponent.vue';
 import ReferenceComponent from '../components/ReferenceComponent.vue';
 import { updateTitle } from '@/helpers/headerHelper';
 
-updateTitle('Тренажер ЭТРАН - Справочник');
+updateTitle('Тренажёр ОТРЭД - Справочник');
 </script>
 
 <template>

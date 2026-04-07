@@ -9,7 +9,7 @@ const canAccess = ref(false);
 
 onMounted(() => {
   canAccess.value = hasAnyRealmRole(['teacher', 'app-admin']);
-  updateTitle('Тренажер ЭТРАН - Конструктор тестов');
+  updateTitle('Тренажёр ОТРЭД - Конструктор тестов');
 });
 </script>
 

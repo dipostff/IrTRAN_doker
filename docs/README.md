@@ -20,3 +20,10 @@
 - `DICTIONARIES_IMPORT.md` — импорт справочников из JSON/XLSX и шаблоны.
 - `STUDENT_PERFORMANCE_AND_NOTIFICATIONS.md` — модуль «Успеваемость», уведомления/дедлайны, модерация профиля, авто-уведомления и эскалации.
 
+## Фронтенд тренажёра (Vue, IrTRAN-main)
+
+Сводка правок по учебным формам (акты, памятка, ведомость подачи и уборки):
+
+- [`IrTRAN-main/docs/README.md`](../IrTRAN-main/docs/README.md) — указатель.
+- [`IrTRAN-main/docs/MODULE_UPDATES_RU.md`](../IrTRAN-main/docs/MODULE_UPDATES_RU.md) — полное описание изменений по модулям.
+

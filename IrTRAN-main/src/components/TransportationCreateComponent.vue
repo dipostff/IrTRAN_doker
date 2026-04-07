@@ -1,6 +1,12 @@
 <script setup>
 import { onMounted, ref, watch, computed } from "vue";
-import { saveTransporation, deleteTransporation, getTransportation, getCargoConstraints } from "@/helpers/API";
+import {
+    saveTransporation,
+    deleteTransporation,
+    getTransportation,
+    getCargoConstraints,
+    saveSubmissionSchedule
+} from "@/helpers/API";
 import { updateTitle } from "@/helpers/headerHelper";
 import router from "@/router";
 import { useRoute } from "vue-router";
@@ -17,6 +23,18 @@ const route = useRoute();
 const document = ref(Transporation.getDefaultDocument());
 const selectedPayerId = ref(null);
 const saveError = ref(null);
+const selectedSendingIds = ref([]);
+const selectedSubmissionScheduleIds = ref([]);
+const selectedPayerIds = ref([]);
+const activeSendingId = ref(null);
+const sendingResetNonce = ref(0);
+const selectedSubmissionSendNumberId = ref(null);
+const submissionDraft = ref({
+    id: null,
+    submission_date: "",
+    weight: "",
+    count_wagon: ""
+});
 
 // Допустимые группы грузов по узлу/станции (когда в БД настроены ограничения)
 const cargoConstraints = ref({
@@ -54,11 +72,6 @@ const firstSendingCargoName = computed(() => {
     return s && listsStore.cargos[s.id_cargo]?.name ? listsStore.cargos[s.id_cargo].name : "—";
 });
 
-// Упрощённое расстояние для учебного расчёта (в реальности берётся из справочника/карты)
-const freightDistanceKm = computed(() => {
-    return document.value?.freight_distance_km ?? null;
-});
-
 // Сумма вагонов по всем отправкам
 const totalWagonsCount = computed(() => {
     const ids = document.value?.Sendings;
@@ -86,7 +99,7 @@ const avgLoadPerWagon = computed(() => {
 const freightCostFormatted = computed(() => {
     const ids = document.value?.Sendings;
     if (!Array.isArray(ids) || ids.length === 0) return "—";
-    const distanceKm = Number(document.value?.freight_distance_km) || 500;
+    const distanceKm = Number(actualDistanceKm.value) || 500;
     const ratePerTonKm = 0.5; // условный тариф руб/(т·км) для обучения
     let total = 0;
     const sendings = listsStore.sendings || {};
@@ -100,10 +113,9 @@ const freightCostFormatted = computed(() => {
     return total ? total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, " ") : "—";
 });
 
-/** API отдаёт Sendings как объекты; в БД и addSendings нужны только id */
-function normalizeSendingIds(sendings) {
-    if (!Array.isArray(sendings)) return [];
-    return sendings
+function normalizeIdList(items) {
+    if (!Array.isArray(items)) return [];
+    return items
         .map((item) => {
             if (item == null) return null;
             if (typeof item === "object" && item.id != null) return Number(item.id);
@@ -116,9 +128,72 @@ function normalizeSendingIds(sendings) {
 function normalizeDocument(data) {
     const base = Transporation.getDefaultDocument();
     const merged = Object.assign({}, base, data || {});
-    merged.Sendings = normalizeSendingIds(merged.Sendings);
+    merged.Sendings = normalizeIdList(merged.Sendings);
+    merged.SubmissionSchedules = normalizeIdList(merged.SubmissionSchedules);
+    merged.Payers = normalizeIdList(merged.Payers);
     return merged;
 }
+
+const sendingRows = computed(() => {
+    const ids = Array.isArray(document.value?.Sendings) ? document.value.Sendings : [];
+    return ids.map((id) => listsStore.sendings?.[id]).filter(Boolean);
+});
+
+const submissionScheduleRows = computed(() => {
+    const ids = Array.isArray(document.value?.SubmissionSchedules) ? document.value.SubmissionSchedules : [];
+    return ids.map((id) => listsStore.submission_schedules?.[id]).filter(Boolean);
+});
+
+const payerRows = computed(() => {
+    const ids = Array.isArray(document.value?.Payers) ? document.value.Payers : [];
+    return ids.map((id) => listsStore.payers?.[id]).filter(Boolean);
+});
+
+const totalSubmissionWagons = computed(() =>
+    submissionScheduleRows.value.reduce((sum, row) => sum + (Number(row?.count_wagon) || 0), 0)
+);
+
+const totalSubmissionWeight = computed(() =>
+    submissionScheduleRows.value.reduce((sum, row) => sum + (Number(row?.weight) || 0), 0)
+);
+
+const totalSendingWeight = computed(() =>
+    sendingRows.value.reduce((sum, s) => sum + (Number(s?.weight) || 0), 0)
+);
+
+const staticLoadText = computed(() => {
+    const wagons = sendingRows.value.reduce((sum, s) => sum + (Number(s?.count_wagon) || 0), 0);
+    const weight = totalSendingWeight.value;
+    if (!wagons || !weight) return "—";
+    const avg = (weight / wagons).toFixed(1);
+    return `${avg} т/ваг (${weight} т, ${wagons} ваг.)`;
+});
+
+const bankDetailsText = computed(() => {
+    const payer = payerRows.value[0];
+    if (payer) {
+        const okpo = payer.OKPO ? `ОКПО ${payer.OKPO}` : null;
+        const addr = payer.addr || null;
+        return [okpo, addr].filter(Boolean).join(", ") || payer.name || "—";
+    }
+    const shipper = listsStore.legal_entities?.[document.value?.id_shipper];
+    if (!shipper) return "—";
+    return [shipper.OKPO ? `ОКПО ${shipper.OKPO}` : null, shipper.INN ? `ИНН ${shipper.INN}` : null]
+        .filter(Boolean)
+        .join(", ") || "—";
+});
+
+const actualDistanceKm = computed(() => {
+    const explicit = Number(document.value?.freight_distance_km);
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    const fromCode = Number(listsStore.stations?.[document.value?.id_station_departure]?.code);
+    const toCode = Number(listsStore.stations?.[firstSending.value?.id_station_destination]?.code);
+    if (Number.isFinite(fromCode) && Number.isFinite(toCode)) {
+        const pseudo = Math.max(1, Math.round(Math.abs(toCode - fromCode) / 10));
+        return pseudo;
+    }
+    return null;
+});
 
 async function saveDocument() {
     saveError.value = null;
@@ -132,8 +207,14 @@ async function saveDocument() {
     try {
         const payload = {
             ...document.value,
-            Sendings: normalizeSendingIds(document.value.Sendings),
-            Payers: selectedPayerId.value ? [selectedPayerId.value] : []
+            Sendings: normalizeIdList(document.value.Sendings),
+            SubmissionSchedules: normalizeIdList(document.value.SubmissionSchedules),
+            Payers: (() => {
+                const ids = normalizeIdList(document.value.Payers);
+                if (ids.length > 0) return ids;
+                const selected = selectedPayerId.value != null ? Number(selectedPayerId.value) : NaN;
+                return Number.isFinite(selected) ? [selected] : [];
+            })()
         };
         let saveDoc = await saveTransporation(payload);
         if (!saveDoc || saveDoc.error || !saveDoc.id) {
@@ -164,11 +245,161 @@ function deleteDocument() {
     router.push("/menu");
 }
 
-function updateSending(sendingId) {
-    const id = sendingId != null ? Number(sendingId) : NaN;
+function updateSending(sendingValue) {
+    const id = sendingValue && typeof sendingValue === "object"
+        ? Number(sendingValue.id)
+        : Number(sendingValue);
     if (!Number.isFinite(id)) return;
-    if (document.value.Sendings.includes(id)) return;
-    document.value.Sendings.push(id);
+    if (sendingValue && typeof sendingValue === "object") {
+        listsStore.sendings[id] = sendingValue;
+    }
+    if (!Array.isArray(document.value.Sendings)) {
+        document.value.Sendings = [];
+    }
+    if (!document.value.Sendings.includes(id)) {
+        document.value.Sendings.push(id);
+    }
+    selectedSendingIds.value = [];
+}
+
+function startCreateSending() {
+    activeSendingId.value = null;
+    sendingResetNonce.value += 1;
+}
+
+function startEditSending() {
+    if ((selectedSendingIds.value || []).length !== 1) {
+        saveError.value = "Для изменения отправки выберите ровно одну строку.";
+        return;
+    }
+    const id = Number(selectedSendingIds.value?.[0]);
+    if (!Number.isFinite(id)) return;
+    activeSendingId.value = id;
+}
+
+function removeSelectedSendings() {
+    if (!selectedSendingIds.value || selectedSendingIds.value.length === 0) {
+        saveError.value = "Для удаления отправок выберите хотя бы одну строку.";
+        return;
+    }
+    const selected = new Set((selectedSendingIds.value || []).map((x) => Number(x)));
+    document.value.Sendings = (document.value.Sendings || []).filter((id) => !selected.has(Number(id)));
+    selectedSendingIds.value = [];
+}
+
+function applySelectedPayer() {
+    const id = selectedPayerId.value != null ? Number(selectedPayerId.value) : NaN;
+    if (!Number.isFinite(id)) return;
+    if (!Array.isArray(document.value.Payers)) {
+        document.value.Payers = [];
+    }
+    if (!document.value.Payers.includes(id)) {
+        document.value.Payers.push(id);
+    }
+    selectedPayerIds.value = [];
+}
+
+function closeModalSafely(modalId) {
+    try {
+        if (document.activeElement && typeof document.activeElement.blur === "function") {
+            document.activeElement.blur();
+        }
+        const modalEl = document.getElementById(modalId);
+        if (!modalEl) return;
+        const bs = window.bootstrap;
+        if (bs?.Modal) {
+            const instance = bs.Modal.getInstance(modalEl) || new bs.Modal(modalEl);
+            instance.hide();
+        }
+    } catch (_) {
+        // noop
+    }
+}
+
+function applySelectedPayerAndClose() {
+    applySelectedPayer();
+    if (!saveError.value) closeModalSafely("staticPlatelshic");
+}
+
+function startEditPayer() {
+    if ((selectedPayerIds.value || []).length !== 1) {
+        saveError.value = "Для изменения плательщика выберите ровно одну строку.";
+        return;
+    }
+    const id = Number(selectedPayerIds.value?.[0]);
+    if (!Number.isFinite(id)) return;
+    selectedPayerId.value = id;
+}
+
+function removeSelectedPayers() {
+    if (!selectedPayerIds.value || selectedPayerIds.value.length === 0) {
+        saveError.value = "Для удаления плательщиков выберите хотя бы одну строку.";
+        return;
+    }
+    const selected = new Set((selectedPayerIds.value || []).map((x) => Number(x)));
+    document.value.Payers = (document.value.Payers || []).filter((id) => !selected.has(Number(id)));
+    selectedPayerIds.value = [];
+}
+
+async function applySubmissionSchedule() {
+    const payload = {
+        id: submissionDraft.value.id || undefined,
+        id_send_number: selectedSubmissionSendNumberId.value ? Number(selectedSubmissionSendNumberId.value) : null,
+        submission_date: submissionDraft.value.submission_date || null,
+        weight: submissionDraft.value.weight !== "" ? Number(submissionDraft.value.weight) : null,
+        count_wagon: submissionDraft.value.count_wagon !== "" ? Number(submissionDraft.value.count_wagon) : null
+    };
+    const created = await saveSubmissionSchedule(payload);
+    if (!created || created.error || created.id == null) {
+        saveError.value = created?.message || "Не удалось сохранить график подачи.";
+        return;
+    }
+    const id = Number(created.id);
+    listsStore.submission_schedules[id] = created;
+    if (!Array.isArray(document.value.SubmissionSchedules)) {
+        document.value.SubmissionSchedules = [];
+    }
+    if (!document.value.SubmissionSchedules.includes(id)) {
+        document.value.SubmissionSchedules.push(id);
+    }
+    submissionDraft.value = { id: null, submission_date: "", weight: "", count_wagon: "" };
+    selectedSubmissionSendNumberId.value = null;
+    selectedSubmissionScheduleIds.value = [];
+}
+
+async function applySubmissionScheduleAndClose() {
+    await applySubmissionSchedule();
+    if (!saveError.value) closeModalSafely("staticGraficPodach");
+}
+
+function startEditSubmissionSchedule() {
+    if ((selectedSubmissionScheduleIds.value || []).length !== 1) {
+        saveError.value = "Для изменения графика подачи выберите ровно одну строку.";
+        return;
+    }
+    const id = Number(selectedSubmissionScheduleIds.value?.[0]);
+    if (!Number.isFinite(id)) return;
+    const row = listsStore.submission_schedules?.[id];
+    if (!row) return;
+    submissionDraft.value = {
+        id: row.id,
+        submission_date: row.submission_date ? String(row.submission_date).slice(0, 10) : "",
+        weight: row.weight ?? "",
+        count_wagon: row.count_wagon ?? ""
+    };
+    selectedSubmissionSendNumberId.value = row.id_send_number ?? null;
+}
+
+function removeSelectedSubmissionSchedules() {
+    if (!selectedSubmissionScheduleIds.value || selectedSubmissionScheduleIds.value.length === 0) {
+        saveError.value = "Для удаления графиков подачи выберите хотя бы одну строку.";
+        return;
+    }
+    const selected = new Set((selectedSubmissionScheduleIds.value || []).map((x) => Number(x)));
+    document.value.SubmissionSchedules = (document.value.SubmissionSchedules || []).filter(
+        (id) => !selected.has(Number(id))
+    );
+    selectedSubmissionScheduleIds.value = [];
 }
 
 async function fetchData() {
@@ -180,8 +411,8 @@ async function fetchData() {
             return;
         }
         document.value = normalizeDocument(response);
-        if (Array.isArray(response.Payers) && response.Payers.length > 0) {
-            selectedPayerId.value = response.Payers[0].id || response.Payers[0];
+        if (Array.isArray(document.value.Payers) && document.value.Payers.length > 0) {
+            selectedPayerId.value = document.value.Payers[0];
         } else {
             selectedPayerId.value = null;
         }
@@ -397,9 +628,9 @@ watch(
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <simple-button data-toggle="modal" data-target="#DobavitOtpravka" title="Добавить"/>
-                        <simple-button title="Изменить"/>
-                        <simple-button title="Удалить"/>
+                        <simple-button data-toggle="modal" data-target="#DobavitOtpravka" title="Добавить" @click="startCreateSending"/>
+                        <simple-button data-toggle="modal" data-target="#DobavitOtpravka" title="Изменить" @click="startEditSending"/>
+                        <simple-button title="Удалить" @click="removeSelectedSendings"/>
                         <simple-button title="Копировать"/>
                         <simple-button title="Вставить"/>
                     </div>
@@ -429,26 +660,22 @@ watch(
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr
-                                        v-for="(idSending, index) in document.Sendings"
-                                        :key="idSending"
-                                        v-if="listsStore.sendings && listsStore.sendings[idSending]"
-                                    >
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td>{{ listsStore.sendings?.[idSending]?.id ?? '' }}</td>
-                                        <td>{{ listsStore.cargos[listsStore.sendings?.[idSending]?.id_cargo]?.code_ETSNG ?? '' }}</td>
-                                        <td>{{ listsStore.cargos[listsStore.sendings?.[idSending]?.id_cargo]?.name ?? '' }}</td>
-                                        <td>{{ listsStore.rolling_stock_types[listsStore.sendings?.[idSending]?.id_rolling_stock_type]?.name ?? '' }}</td>
-                                        <td>{{ listsStore.sendings?.[idSending]?.count_wagon ?? '' }}</td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(sending, index) in sendingRows" :key="sending.id">
+                                        <td><input type="checkbox" class="row-checkbox" :value="sending.id" v-model="selectedSendingIds" /></td>
+                                        <td>{{ sending.id ?? index + 1 }}</td>
+                                        <td>{{ listsStore.cargos[sending.id_cargo]?.code_ETSNG ?? "" }}</td>
+                                        <td>{{ listsStore.cargos[sending.id_cargo]?.name ?? "" }}</td>
+                                        <td>{{ listsStore.rolling_stock_types[sending.id_rolling_stock_type]?.name ?? "" }}</td>
+                                        <td>{{ sending.count_wagon ?? "" }}</td>
+                                        <td>{{ sending.weight ?? "" }}</td>
+                                        <td>{{ listsStore.stations[sending.id_station_departure]?.name ?? "" }}</td>
+                                        <td>{{ listsStore.stations[sending.id_station_departure]?.railway ?? "" }}</td>
+                                        <td>{{ listsStore.countries[sending.id_country_destination]?.name ?? "" }}</td>
+                                        <td>{{ sending.payment ?? "" }}</td>
+                                        <td>{{ sending.currency ?? "" }}</td>
+                                        <td>{{ sending.VAT_amount ?? "" }}</td>
+                                        <td>{{ sending.note ?? "" }}</td>
+                                        <td>{{ sending.owner_wagon_name ?? "" }}</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -457,14 +684,14 @@ watch(
                 </div>
 
                 <!--Создание новой Отправки модальное окно -->
-                <SendingCompanent :object="document" @saveSending="updateSending"/>
+                <SendingCompanent :object="document" :sending-id="activeSendingId" :reset-nonce="sendingResetNonce" @saveSending="updateSending"/>
                 <!------------------------------->
 
                 <!-- Стат нагрузка появляется после заполнения отправки -->
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Стат. нагрузка</label>
                     <div class="col-auto">
-                        <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled="disabled" />
+                        <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled="disabled" :value="staticLoadText" />
                     </div>
                 </div>
 
@@ -479,8 +706,8 @@ watch(
                     <div class="col-auto">
                         <button type="button" class="btn btn-custom">Рассчитать график подач</button>
                         <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticGraficPodach">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticGraficPodach" @click="startEditSubmissionSchedule">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedSubmissionSchedules">Удалить</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -502,14 +729,14 @@ watch(
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(schedule, index) in submissionScheduleRows" :key="schedule.id">
+                                        <td><input type="checkbox" class="row-checkbox" :value="schedule.id" v-model="selectedSubmissionScheduleIds" /></td>
+                                        <td>{{ schedule.id ?? index + 1 }}</td>
+                                        <td>{{ listsStore.send_numbers[schedule.id_send_number]?.name ?? schedule.id_send_number ?? "—" }}</td>
+                                        <td>{{ schedule.submission_date ? String(schedule.submission_date).slice(0, 10) : "—" }}</td>
+                                        <td>{{ schedule.count_wagon ?? "—" }}</td>
+                                        <td>{{ schedule.weight ?? "—" }}</td>
+                                        <td>—</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -523,24 +750,24 @@ watch(
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
                                 <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; font-weight: bold">График подачи</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <button type="button" class="btn-close" aria-label="Закрыть" style="color: white" @click="closeModalSafely('staticGraficPodach')"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-1">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
-                                        <button type="button" class="btn btn-custom" data-dismiss="modal">Отменить</button>
+                                        <button type="button" class="btn btn-custom" @click="applySubmissionScheduleAndClose">Применить</button>
+                                        <button type="button" class="btn btn-custom" @click="closeModalSafely('staticGraficPodach')">Отменить</button>
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Отправка</label>
                                     <div class="col-3">
-                                        <select class="form-select mt-0 custom-input">
-                                            <option value="">Выберете элемент списка</option>
-                                            <option value="">Отправка №1</option>
-                                            <option value="">Отправка №2</option>
-                                            <option value="">Отправка №3</option>
+                                        <select class="form-select mt-0 custom-input" v-model="selectedSubmissionSendNumberId">
+                                            <option :value="null">Выберите элемент списка</option>
+                                            <option v-for="sendNumber in listsStore.send_numbers" :key="sendNumber.id" :value="sendNumber.id">
+                                                {{ sendNumber.name || `№${sendNumber.id}` }}
+                                            </option>
                                         </select>
                                     </div>
                                 </div>
@@ -548,21 +775,21 @@ watch(
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Дата подачи</label>
                                     <div class="col-auto">
-                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" />
+                                        <input type="date" class="form-control mt-0 custom-input" style="width: 150px" v-model="submissionDraft.submission_date" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Вес (тонн)</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" placeholder="" />
+                                        <input type="number" class="form-control mt-0 custom-input" placeholder="" v-model="submissionDraft.weight" />
                                     </div>
                                 </div>
 
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Кол-во вагонов (конт)</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" placeholder="" />
+                                        <input type="number" class="form-control mt-0 custom-input" placeholder="" v-model="submissionDraft.count_wagon" />
                                     </div>
                                 </div>
                             </div>
@@ -581,8 +808,8 @@ watch(
                 <div class="row mb-1">
                     <div class="col-auto">
                         <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticPlatelshic">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticPlatelshic" @click="startEditPayer">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedPayers">Удалить</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -606,16 +833,16 @@ watch(
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(payer, index) in payerRows" :key="payer.id">
+                                        <td><input type="checkbox" class="row-checkbox" :value="payer.id" v-model="selectedPayerIds" /></td>
+                                        <td>{{ payer.id ?? index + 1 }}</td>
+                                        <td>{{ payer.id_payer ?? "—" }}</td>
+                                        <td>{{ payer.OKPO ?? "—" }}</td>
+                                        <td>{{ payer.name ?? "—" }}</td>
+                                        <td>{{ listsStore.countries[payer.id_country_transportation]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.payer_types[payer.id_payer_type]?.name ?? "—" }}</td>
+                                        <td>{{ document.Sendings?.[0] ?? "—" }}</td>
+                                        <td>{{ payer.id_payer ?? "—" }}</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -630,13 +857,13 @@ watch(
                             <div class="modal-header" style="background-color: #7da5f0">
                                 <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; font-weight: bold">Плательщики/Экспедиторы</span>
                                 <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; background-color: red; margin: 0 20%">Не указано, кто платит по заявке</span>
-                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white"></button>
+                                <button type="button" class="btn-close" aria-label="Закрыть" style="color: white" @click="closeModalSafely('staticPlatelshic')"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-1">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom">Применить</button>
-                                        <button type="button" class="btn btn-custom" data-dismiss="modal">Отменить</button>
+                                        <button type="button" class="btn btn-custom" @click="applySelectedPayerAndClose">Применить</button>
+                                        <button type="button" class="btn btn-custom" @click="closeModalSafely('staticPlatelshic')">Отменить</button>
                                     </div>
                                 </div>
 
@@ -880,7 +1107,7 @@ watch(
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Банковские реквизиты</label>
                      <div class="col-auto">
-                             <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled :value="document.addr ?? ''"/>
+                             <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled :value="bankDetailsText"/>
                         </div>
                 </div>
 
@@ -922,12 +1149,12 @@ watch(
                             </tr>
                         </thead>
                         <tbody class="table-group-divider">
-                            <tr>
+                            <tr v-for="schedule in submissionScheduleRows" :key="`account-${schedule.id}`">
                                 <td><input type="checkbox" class="row-checkbox" /></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
+                                <td>{{ schedule.submission_date ? String(schedule.submission_date).slice(0, 10) : "—" }}</td>
+                                <td>{{ listsStore.stations[document.id_station_departure]?.name ?? "—" }}</td>
+                                <td>{{ schedule.count_wagon ?? "—" }}</td>
+                                <td>{{ schedule.weight ?? "—" }}</td>
                                 <td><input style="width: 100%; height: 100%; background-color: transparent; border-color: transparent;"/></td>
                                 <td><input style="width: 100%; height: 100%; background-color: transparent; border-color: transparent;"/></td>
                                 <td><input style="width: 100%; height: 100%; background-color: transparent; border-color: transparent;"/></td>
@@ -941,8 +1168,8 @@ watch(
                                 <td></td>
                                 <td>ИТОГО</td>
                                 <td></td>
-                                <td></td>
-                                <td></td>
+                                <td>{{ totalSubmissionWagons || "—" }}</td>
+                                <td>{{ totalSubmissionWeight || "—" }}</td>
                                 <td></td>
                                 <td></td>
                                 <td></td>
@@ -1163,7 +1390,7 @@ watch(
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Фактическое расстояние между станциями, км</label>
                      <div class="col-auto">
-                             <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled :value="freightDistanceKm ?? '—'"/>
+                             <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled :value="actualDistanceKm ?? '—'"/>
                         </div>
                 </div>
 

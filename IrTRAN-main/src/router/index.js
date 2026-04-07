@@ -301,22 +301,22 @@ const router = createRouter({
 
 const PAGE_TITLE = {
     authotrization: "Авторизация",
-    menu: "Тренажер ЭТРАН главное меню",
+    menu: "Тренажёр ОТРЭД главное меню",
     "transporation-menu": "Заявка на грузоперевозку",
     "transporation-create": "Заявка на грузоперевозку",
     "invoice-menu": "Накладная",
     "invoice-create": "Накладная ",
     "invoice-menu": "Накладная",
     "invoice-create": "Накладная ",
-    "report-error": "Тренажер ЭТРАН - Сообщить об ошибке",
-    notifications: "Тренажер ЭТРАН - Уведомления и дедлайны",
-    "test-mode": "Тренажер ЭТРАН - Режим теста",
-    reference: "Тренажер ЭТРАН - Справочник",
-    scenarios: "Тренажер ЭТРАН - Сценарии",
-    "admin-panel": "Тренажер ЭТРАН - Панель управления",
-    "teacher-dashboard": "Тренажер ЭТРАН - Панель преподавателя",
-    "dictionary-module": "Тренажер ЭТРАН - Заполнение справочников",
-    "student-performance": "Тренажер ЭТРАН - Успеваемость",
+    "report-error": "Тренажёр ОТРЭД - Сообщить об ошибке",
+    notifications: "Тренажёр ОТРЭД - Уведомления и дедлайны",
+    "test-mode": "Тренажёр ОТРЭД - Режим теста",
+    reference: "Тренажёр ОТРЭД - Справочник",
+    scenarios: "Тренажёр ОТРЭД - Сценарии",
+    "admin-panel": "Тренажёр ОТРЭД - Панель управления",
+    "teacher-dashboard": "Тренажёр ОТРЭД - Панель преподавателя",
+    "dictionary-module": "Тренажёр ОТРЭД - Заполнение справочников",
+    "student-performance": "Тренажёр ОТРЭД - Успеваемость",
 };
 
 // Navigation guard to protect routes
@@ -370,7 +370,7 @@ function isNoviceSessionExtendedPath(path) {
 }
 
 router.afterEach(async (toRoute, fromRoute) => {
-    window.document.title = PAGE_TITLE[toRoute.name] ?? "Тренажер ЭТРАН";
+    window.document.title = PAGE_TITLE[toRoute.name] ?? "Тренажёр ОТРЭД";
     if (toRoute.name === "menu") {
         sessionStorage.removeItem("irtran-training-profile");
     }

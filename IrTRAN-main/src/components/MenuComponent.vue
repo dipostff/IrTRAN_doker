@@ -146,8 +146,8 @@ const CATEGORY_ICON = {
   <div class="menu-shell">
     <div class="menu-hero">
       <div class="hero-card">
-        <div class="hero-badge">IrTRAN</div>
-        <h2 class="hero-title">Тренажёр ЭТРАН по транспортной документации</h2>
+        <div class="hero-badge">ОТРЭД</div>
+        <h2 class="hero-title">Тренажёр ОТРЭД по транспортной документации</h2>
         <p class="hero-text">
           Здесь вы можете отрабатывать оформление документов, проходить обучающие сценарии и закреплять теорию тестами.
           Всё сделано так, чтобы тренироваться быстро и без «страха ошибки».

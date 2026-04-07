@@ -405,6 +405,18 @@ export async function saveSending(object) {
     return response;
 }
 
+export async function saveSubmissionSchedule(object) {
+    let act = object.id ? 'update' : 'create';
+
+    let request = {
+        "act": act,
+        "object": object
+    };
+
+    let response = await sendRequest(baseUrl + '/submission_schedules', request);
+    return response;
+}
+
 //--------------------------------------------------
 
 //------------------Удаление------------------------

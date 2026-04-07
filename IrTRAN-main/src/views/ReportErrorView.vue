@@ -4,6 +4,6 @@ import ReportErrorComponent from "../components/ReportErrorComponent.vue";
 </script>
 
 <template>
-    <HeaderComponent title="Тренажер ЭТРАН - Сообщить об ошибке" />
+    <HeaderComponent title="Тренажёр ОТРЭД - Сообщить об ошибке" />
     <ReportErrorComponent />
 </template>

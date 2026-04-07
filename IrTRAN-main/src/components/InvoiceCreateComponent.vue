@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useListsStore } from "@/stores/main";
 import { useTrainingSimulatorContext } from "@/composables/useTrainingSimulatorContext";
@@ -14,6 +14,10 @@ import {
     getSpeedTypes,
     getRollingStockTypes,
     getOwnerships,
+    getCargos,
+    getTransportPackageTypes,
+    getSubmissionSchedules,
+    getTransportations,
     saveStudentDocument,
     updateStudentDocument,
 } from "@/helpers/API";
@@ -27,6 +31,16 @@ const { trainingContext } = useTrainingSimulatorContext();
 const INVOICE_STORAGE_KEY = "invoice_documents";
 const saveError = ref(null);
 const saveSuccess = ref(null);
+const selectedRouteRows = ref([]);
+const selectedSpecialMarks = ref([]);
+const selectedAttachedDocs = ref([]);
+const selectedGoods = ref([]);
+const selectedContainers = ref([]);
+const selectedWagons = ref([]);
+const selectedConductors = ref([]);
+const selectedWagonMarks = ref([]);
+const editingSection = ref(null);
+const editingIndex = ref(null);
 
 function getDefaultDocument() {
     return {
@@ -44,10 +58,31 @@ function getDefaultDocument() {
         destination_railway_path: "",
         id_speed_type: null,
         id_place_of_payment: null,
+        id_request_transportation: null,
+        id_submission_schedule: null,
+        cargo_work_type: null,
+        id_country_departure: null,
+        id_country_destination: null,
+        payment_form: null,
+        container_capacity_tons: null,
         id_receiver: null,
         receiver_addr: "",
         id_rolling_stock_type: null,
         id_ownership: null,
+        goods: [],
+        route_rows: [],
+        special_marks: [],
+        attached_documents: [],
+        containers: [],
+        wagons: [],
+        conductors: [],
+        wagon_marks: [],
+        loading_time_msk: "",
+        loading_time_local: "",
+        mass_determination_method: null,
+        cargo_secured_according_to: null,
+        technical_conditions: "",
+        loading_finished: false,
         backendId: null,
     };
 }
@@ -70,6 +105,198 @@ const blankTypeOptions = [
     { id: 2, name: "Дополнение к перевозочным документам", code: "ГУ-1д" },
 ];
 
+const cargoWorkTypeOptions = [
+    { id: "Погрузка", name: "Погрузка" },
+    { id: "Выгрузка", name: "Выгрузка" },
+    { id: "Перегрузка", name: "Перегрузка" },
+];
+
+const paymentFormOptions = [
+    { id: "Безналичный расчет", name: "Безналичный расчет" },
+    { id: "Предоплата", name: "Предоплата" },
+    { id: "Оплата получателем", name: "Оплата получателем" },
+];
+
+const containerCapacityOptions = [
+    { id: 3, name: "3 т", code: "03" },
+    { id: 5, name: "5 т", code: "05" },
+    { id: 20, name: "20 т", code: "20" },
+    { id: 24, name: "24 т", code: "24" },
+    { id: 30, name: "30 т", code: "30" },
+];
+
+const massDeterminationOptions = [
+    { id: "По трафарету", name: "По трафарету" },
+    { id: "По весам", name: "По весам" },
+    { id: "Расчетным путем", name: "Расчетным путем" },
+];
+
+const cargoSecuredOptions = [
+    { id: "ТУ ЦМ-943", name: "ТУ ЦМ-943" },
+    { id: "МТУ 2024", name: "МТУ 2024" },
+    { id: "Схема размещения грузоотправителя", name: "Схема размещения грузоотправителя" },
+];
+
+const zpuTypeOptions = [
+    { id: "Пломба", name: "Пломба" },
+    { id: "Блокиратор", name: "Блокиратор" },
+    { id: "Тросовый ЗПУ", name: "Тросовый ЗПУ" },
+];
+
+const zpuOwnershipOptions = [
+    { id: "Перевозчик", name: "Перевозчик" },
+    { id: "Грузоотправитель", name: "Грузоотправитель" },
+    { id: "Собственник вагона", name: "Собственник вагона" },
+];
+
+const goodsRows = computed(() => Array.isArray(document.value.goods) ? document.value.goods : []);
+const routeRows = computed(() => Array.isArray(document.value.route_rows) ? document.value.route_rows : []);
+const specialMarksRows = computed(() => Array.isArray(document.value.special_marks) ? document.value.special_marks : []);
+const attachedDocsRows = computed(() => Array.isArray(document.value.attached_documents) ? document.value.attached_documents : []);
+const containersRows = computed(() => Array.isArray(document.value.containers) ? document.value.containers : []);
+const wagonsRows = computed(() => Array.isArray(document.value.wagons) ? document.value.wagons : []);
+const conductorsRows = computed(() => Array.isArray(document.value.conductors) ? document.value.conductors : []);
+const wagonMarksRows = computed(() => Array.isArray(document.value.wagon_marks) ? document.value.wagon_marks : []);
+
+const totalConductorCount = computed(() => conductorsRows.value.length);
+
+function ensureArray(name) {
+    if (!Array.isArray(document.value[name])) document.value[name] = [];
+}
+
+function requireSingleSelection(selectedRef, sectionName) {
+    if (!Array.isArray(selectedRef.value) || selectedRef.value.length !== 1) {
+        saveError.value = `Для изменения в секции "${sectionName}" выберите ровно одну строку.`;
+        return false;
+    }
+    saveError.value = null;
+    saveSuccess.value = `Редактирование: измените значения прямо в выбранной строке секции "${sectionName}".`;
+    setTimeout(() => { saveSuccess.value = null; }, 2500);
+    return true;
+}
+
+function removeSelectedByIndexes(fieldName, selectedRef, sectionName) {
+    ensureArray(fieldName);
+    const selected = new Set((selectedRef.value || []).map((x) => Number(x)));
+    if (selected.size === 0) {
+        saveError.value = `Для удаления в секции "${sectionName}" выберите хотя бы одну строку.`;
+        return;
+    }
+    document.value[fieldName] = document.value[fieldName].filter((_, idx) => !selected.has(idx));
+    selectedRef.value = [];
+    saveError.value = null;
+}
+
+async function startInlineEdit(selectedRef, sectionKey, sectionName) {
+    if (!requireSingleSelection(selectedRef, sectionName)) return;
+    const idx = Number(selectedRef.value[0]);
+    if (!Number.isFinite(idx)) return;
+    editingSection.value = sectionKey;
+    editingIndex.value = idx;
+    await nextTick();
+    const el = document.querySelector(`[data-edit-row="${sectionKey}-${idx}"]`);
+    if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+}
+
+function isRowEditable(sectionKey, idx) {
+    if (editingSection.value !== sectionKey) return true;
+    return editingIndex.value === idx;
+}
+
+function finishInlineEdit() {
+    editingSection.value = null;
+    editingIndex.value = null;
+}
+
+function addRouteRow() {
+    ensureArray("route_rows");
+    document.value.route_rows.push({
+        id_country: document.value.id_country_departure || null,
+        id_station: document.value.id_station_departure || null,
+        distance: "",
+        payer_code: ""
+    });
+}
+function removeRouteRow() { document.value.route_rows.pop(); }
+
+function addSpecialMark() {
+    ensureArray("special_marks");
+    document.value.special_marks.push({ type: "Общая", mark: "", note: "" });
+}
+function removeSpecialMark() { document.value.special_marks.pop(); }
+
+function addAttachedDoc() {
+    ensureArray("attached_documents");
+    document.value.attached_documents.push({ type: "Сертификат", document: "", number: "" });
+}
+function removeAttachedDoc() { document.value.attached_documents.pop(); }
+
+function addGoodsRow() {
+    ensureArray("goods");
+    document.value.goods.push({
+        id_cargo: null,
+        package: "",
+        places: "",
+        packages: "",
+        planned_weight_kg: "",
+        gng_name: "",
+        gng_code: "",
+        danger: ""
+    });
+}
+function removeGoodsRow() { document.value.goods.pop(); }
+
+function addContainerRow() {
+    ensureArray("containers");
+    document.value.containers.push({
+        number: "",
+        id_ownership: null,
+        id_owner: null,
+        capacity_tons: "",
+        net_kg: "",
+        gross_kg: "",
+        zpu_count: ""
+    });
+}
+function removeContainerRow() { document.value.containers.pop(); }
+
+function addWagonRow() {
+    ensureArray("wagons");
+    document.value.wagons.push({
+        number: "",
+        id_rolling_stock_type: null,
+        capacity_tons: "",
+        net_kg: "",
+        gross_kg: "",
+        zpu_count: ""
+    });
+}
+function removeWagonRow() { document.value.wagons.pop(); }
+
+function calculateWagonsNet() {
+    const totalGoodsKg = goodsRows.value.reduce((sum, g) => sum + (Number(g.planned_weight_kg) || 0), 0);
+    if (!wagonsRows.value.length) return;
+    const each = Math.round(totalGoodsKg / wagonsRows.value.length);
+    wagonsRows.value.forEach((w) => {
+        w.net_kg = each;
+        w.gross_kg = each + 24000;
+    });
+}
+
+function addConductorRow() {
+    ensureArray("conductors");
+    document.value.conductors.push({ fio: "", passport_series: "", passport_number: "", mission_id: "" });
+}
+function removeConductorRow() { document.value.conductors.pop(); }
+
+function addWagonMark() {
+    ensureArray("wagon_marks");
+    document.value.wagon_marks.push({ type: "Тарифная", mark: "", note: "" });
+}
+function removeWagonMark() { document.value.wagon_marks.pop(); }
+
 async function loadLists() {
     try {
         await Promise.all([
@@ -80,6 +307,10 @@ async function loadLists() {
             getSpeedTypes(),
             getRollingStockTypes(),
             getOwnerships(),
+            getCargos(),
+            getTransportPackageTypes(),
+            getSubmissionSchedules(),
+            getTransportations(),
         ]);
     } catch (e) {
         console.error("Ошибка загрузки справочников накладной:", e);
@@ -258,15 +489,15 @@ onMounted(async () => {
                 </div>
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">Заявка</label>
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#Zaivka">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
+                    <select-with-search
+                        title="Заявка"
+                        :values="listsStore.transportations"
+                        valueKey="id"
+                        name="id"
+                        v-model="document.id_request_transportation"
+                        modalName="InvoiceRequestTransportation"
+                        :fields="{ 'ID заявки': 'id', 'Период с': 'transportation_date_from', 'Период по': 'transportation_date_to' }"
+                    />
                 </div>
 
                 <!--Найти Заявка отправки модальное окно -->
@@ -325,15 +556,15 @@ onMounted(async () => {
                 <!----------------------------- -->
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">График подач</label>
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#GrafikPodach">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
+                    <select-with-search
+                        title="График подач"
+                        :values="listsStore.submission_schedules"
+                        valueKey="id"
+                        name="id"
+                        v-model="document.id_submission_schedule"
+                        modalName="InvoiceSubmissionSchedule"
+                        :fields="{ 'ID графика': 'id', 'Дата': 'submission_date', 'Вагонов': 'count_wagon', 'Вес': 'weight' }"
+                    />
                 </div>
 
                                 <!--Найти График подач модальное окно -->
@@ -407,15 +638,7 @@ onMounted(async () => {
                 </div>
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">Вид грузовых работ</label>
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 1000px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#VidGruzRabot">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
+                    <simple-select title="Вид грузовых работ" :values="cargoWorkTypeOptions" valueKey="id" name="name" v-model="document.cargo_work_type" />
                 </div>
 
                 <!--Найти Вид грузовых работ отправки модальное окно -->
@@ -470,19 +693,8 @@ onMounted(async () => {
                 <!----------------------------- -->
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">Страна отправления</label>
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#StranaOtprInvoce">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="col-auto">
-                        <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled="disabled" />
-                    </div>
+                    <select-with-search title="Страна отправления" :values="listsStore.countries" valueKey="id" name="name" v-model="document.id_country_departure" modalName="InvoiceCountryDeparture" :fields="{ 'Код ОСКМ': 'OSCM_code', 'Наименование': 'name', 'Краткое': 'short_name' }" />
+                    <disable-simple-input title="Код" :dis="true" :value="listsStore.countries[document.id_country_departure]?.OSCM_code ?? ''" :fixWidth="false" styleInput="width: 100px" />
                 </div>
 
                 <!--Найти Страна отправления модальное окно -->
@@ -539,19 +751,8 @@ onMounted(async () => {
                 <!----------------------------- -->
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">Страна назначения</label>
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#StranaNaznachInvoce">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="col-auto">
-                        <input type="text" class="form-control mt-0 disabled-input" placeholder="" disabled="disabled" />
-                    </div>
+                    <select-with-search title="Страна назначения" :values="listsStore.countries" valueKey="id" name="name" v-model="document.id_country_destination" modalName="InvoiceCountryDestination" :fields="{ 'Код ОСКМ': 'OSCM_code', 'Наименование': 'name', 'Краткое': 'short_name' }" />
+                    <disable-simple-input title="Код" :dis="true" :value="listsStore.countries[document.id_country_destination]?.OSCM_code ?? ''" :fixWidth="false" styleInput="width: 100px" />
                 </div>
 
                 <!--Найти Страна назначения модальное окно -->
@@ -640,15 +841,7 @@ onMounted(async () => {
                 </div>
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">Форма оплаты</label>
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#FormaOplat">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
+                    <simple-select title="Форма оплаты" :values="paymentFormOptions" valueKey="id" name="name" v-model="document.payment_form" />
                 </div>
 
                 <!--Найти Форма оплаты модальное окно -->
@@ -727,20 +920,8 @@ onMounted(async () => {
                 </div>
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">Планируемая грузоподъемность контейнера (т)</label>
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#GruzopodCont">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
-
-                    <label class="col-auto col-form-label mb-0 label-custom" style="width: 50px">Код</label>
-                    <div class="col-auto">
-                        <input type="text" class="form-control mt-0 disabled-input" style="width: 100px" placeholder="" disabled="disabled" />
-                    </div>
+                    <simple-select title="Планируемая грузоподъемность контейнера (т)" :values="containerCapacityOptions" valueKey="id" name="name" v-model="document.container_capacity_tons" />
+                    <disable-simple-input title="Код" :dis="true" :value="containerCapacityOptions.find((x) => x.id === document.container_capacity_tons)?.code ?? ''" :fixWidth="false" styleInput="width: 100px" />
                 </div>
 
                 <!--Найти Планируемая грузоподъемность контейнера (т) модальное окно -->
@@ -822,10 +1003,11 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#DobavitGruz">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
-                        <button type="button" class="btn btn-custom">Удалить все</button>
+                        <button type="button" class="btn btn-custom" @click="addGoodsRow">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedGoods, 'goods', 'Грузы')">Изменить</button>
+                        <button type="button" class="btn btn-custom" v-if="editingSection === 'goods'" @click="finishInlineEdit">Готово</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('goods', selectedGoods, 'Грузы')">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="document.goods = []">Удалить все</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -849,16 +1031,16 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(good, idx) in goodsRows" :key="`good-${idx}`" :data-edit-row="`goods-${idx}`" :class="{ 'editing-row': editingSection === 'goods' && editingIndex === idx }">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedGoods" :disabled="editingSection === 'goods' && editingIndex !== idx" /></td>
+                                        <td>{{ listsStore.cargos[good.id_cargo]?.code_ETSNG ?? "—" }}</td>
+                                        <td>{{ listsStore.cargos[good.id_cargo]?.name ?? good.gng_name ?? "—" }}</td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="good.package" :disabled="!isRowEditable('goods', idx)" /></td>
+                                        <td><input type="number" class="form-control mt-0 custom-input" v-model="good.places" :disabled="!isRowEditable('goods', idx)" /></td>
+                                        <td><input type="number" class="form-control mt-0 custom-input" v-model="good.packages" :disabled="!isRowEditable('goods', idx)" /></td>
+                                        <td><input type="number" class="form-control mt-0 custom-input" v-model="good.planned_weight_kg" :disabled="!isRowEditable('goods', idx)" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="good.gng_code" :disabled="!isRowEditable('goods', idx)" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="good.danger" :disabled="!isRowEditable('goods', idx)" /></td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1282,11 +1464,12 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#RaschetMarhruta">Выполнить расчет маршрута</button>
+                        <button type="button" class="btn btn-custom" @click="addRouteRow">Выполнить расчет маршрута</button>
                         <button type="button" class="btn btn-custom" disabled>Снять промывку</button>
                         <button type="button" class="btn btn-custom" disabled>Перегруз по колее</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedRouteRows, 'route', 'Маршрут следования')">Изменить</button>
+                        <button type="button" class="btn btn-custom" v-if="editingSection === 'route'" @click="finishInlineEdit">Готово</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('route_rows', selectedRouteRows, 'Маршрут следования')">Удалить</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -1317,23 +1500,23 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(routeRow, idx) in routeRows" :key="`route-${idx}`" :data-edit-row="`route-${idx}`" :class="{ 'editing-row': editingSection === 'route' && editingIndex === idx }">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedRouteRows" :disabled="editingSection === 'route' && editingIndex !== idx" /></td>
+                                        <td>{{ listsStore.countries[routeRow.id_country]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.stations[routeRow.id_station]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.stations[routeRow.id_station]?.railway ?? "—" }}</td>
+                                        <td>{{ listsStore.stations[routeRow.id_station]?.code ?? "—" }}</td>
+                                        <td>—</td>
+                                        <td>{{ document.departure_railway_path || "—" }}</td>
+                                        <td>{{ routeRow.distance || "—" }}</td>
+                                        <td>{{ listsStore.legal_entities[document.id_shipper]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.legal_entities[document.id_shipper]?.OKPO ?? "—" }}</td>
+                                        <td>—</td>
+                                        <td>ЖД</td>
+                                        <td>1520</td>
+                                        <td>Станция</td>
+                                        <td>{{ listsStore.stations[routeRow.id_station]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.stations[routeRow.id_station]?.code ?? "—" }}</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1378,10 +1561,11 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#DobavitSpecOtmetku">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
-                        <button type="button" class="btn btn-custom">Удалить все</button>
+                        <button type="button" class="btn btn-custom" @click="addSpecialMark">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedSpecialMarks, 'special', 'Специальные отметки')">Изменить</button>
+                        <button type="button" class="btn btn-custom" v-if="editingSection === 'special'" @click="finishInlineEdit">Готово</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('special_marks', selectedSpecialMarks, 'Специальные отметки')">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="document.special_marks = []">Удалить все</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -1400,11 +1584,11 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(mark, idx) in specialMarksRows" :key="`sp-${idx}`" :data-edit-row="`special-${idx}`" :class="{ 'editing-row': editingSection === 'special' && editingIndex === idx }">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedSpecialMarks" :disabled="editingSection === 'special' && editingIndex !== idx" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="mark.type" :disabled="!isRowEditable('special', idx)" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="mark.mark" :disabled="!isRowEditable('special', idx)" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="mark.note" :disabled="!isRowEditable('special', idx)" /></td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1509,10 +1693,11 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#DobavitPrilagDoc">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
-                        <button type="button" class="btn btn-custom">Удалить все</button>
+                        <button type="button" class="btn btn-custom" @click="addAttachedDoc">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedAttachedDocs, 'docs', 'Прилагаемые и предъявляемые документы')">Изменить</button>
+                        <button type="button" class="btn btn-custom" v-if="editingSection === 'docs'" @click="finishInlineEdit">Готово</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('attached_documents', selectedAttachedDocs, 'Прилагаемые и предъявляемые документы')">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="document.attached_documents = []">Удалить все</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -1533,13 +1718,13 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(docRow, idx) in attachedDocsRows" :key="`ad-${idx}`" :data-edit-row="`docs-${idx}`" :class="{ 'editing-row': editingSection === 'docs' && editingIndex === idx }">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedAttachedDocs" :disabled="editingSection === 'docs' && editingIndex !== idx" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="docRow.type" :disabled="!isRowEditable('docs', idx)" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="docRow.document" :disabled="!isRowEditable('docs', idx)" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="docRow.number" :disabled="!isRowEditable('docs', idx)" /></td>
+                                        <td>0</td>
+                                        <td>{{ listsStore.rolling_stock_types[document.id_rolling_stock_type]?.name ?? "—" }}</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1674,10 +1859,11 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#DobavitCont">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
-                        <button type="button" class="btn btn-custom">Удалить все</button>
+                        <button type="button" class="btn btn-custom" @click="addContainerRow">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedContainers, 'containers', 'Контейнеры')">Изменить</button>
+                        <button type="button" class="btn btn-custom" v-if="editingSection === 'containers'" @click="finishInlineEdit">Готово</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('containers', selectedContainers, 'Контейнеры')">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="document.containers = []">Удалить все</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -1704,19 +1890,19 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(container, idx) in containersRows" :key="`ctr-${idx}`" :data-edit-row="`containers-${idx}`" :class="{ 'editing-row': editingSection === 'containers' && editingIndex === idx }">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedContainers" :disabled="editingSection === 'containers' && editingIndex !== idx" /></td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="container.number" :disabled="!isRowEditable('containers', idx)" /></td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>{{ container.gross_kg || "—" }}</td>
+                                        <td>{{ container.net_kg || "—" }}</td>
+                                        <td>{{ listsStore.ownerships[container.id_ownership]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.countries[document.id_country_departure]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.legal_entities[container.id_owner]?.OKPO ?? "—" }}</td>
+                                        <td>{{ listsStore.legal_entities[container.id_owner]?.name ?? "—" }}</td>
+                                        <td>{{ container.zpu_count || "—" }}</td>
+                                        <td>—</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -2279,10 +2465,11 @@ onMounted(async () => {
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#DobavitVagon">Добавить</button>
-                        <button type="button" class="btn btn-custom">Изменить</button>
-                        <button type="button" class="btn btn-custom">Удалить</button>
-                        <button type="button" class="btn btn-custom">Удалить все</button>
+                        <button type="button" class="btn btn-custom" @click="addWagonRow">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedWagons, 'wagons', 'Вагоны')">Изменить</button>
+                        <button type="button" class="btn btn-custom" v-if="editingSection === 'wagons'" @click="finishInlineEdit">Готово</button>
+                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('wagons', selectedWagons, 'Вагоны')">Удалить</button>
+                        <button type="button" class="btn btn-custom" @click="document.wagons = []">Удалить все</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
                     </div>
@@ -2320,30 +2507,30 @@ onMounted(async () => {
                                     </tr>
                                 </thead>
                                 <tbody class="table-group-divider">
-                                    <tr>
-                                        <td><input type="checkbox" class="row-checkbox" /></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
-                                        <td></td>
+                                    <tr v-for="(wagon, idx) in wagonsRows" :key="`wag-${idx}`" :data-edit-row="`wagons-${idx}`" :class="{ 'editing-row': editingSection === 'wagons' && editingIndex === idx }">
+                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedWagons" :disabled="editingSection === 'wagons' && editingIndex !== idx" /></td>
+                                        <td>{{ idx + 1 }}</td>
+                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="wagon.number" :disabled="!isRowEditable('wagons', idx)" /></td>
+                                        <td>{{ listsStore.countries[document.id_country_departure]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.legal_entities[document.id_shipper]?.name ?? "—" }}</td>
+                                        <td>{{ listsStore.rolling_stock_types[wagon.id_rolling_stock_type]?.name ?? "—" }}</td>
+                                        <td>{{ wagon.capacity_tons || "—" }}</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>{{ wagon.gross_kg || "—" }}</td>
+                                        <td>{{ wagon.net_kg || "—" }}</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>—</td>
+                                        <td>{{ wagon.zpu_count || "—" }}</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -2497,7 +2684,7 @@ onMounted(async () => {
                                     </div>
 
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom" disabled>Рассчитать</button>
+                                        <button type="button" class="btn btn-custom" @click="calculateWagonsNet">Рассчитать</button>
                                     </div>
                                 </div>
 
@@ -2523,10 +2710,11 @@ onMounted(async () => {
 
                                 <div class="row mb-1">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#DobavitProvodnika">Добавить</button>
-                                        <button type="button" class="btn btn-custom">Изменить</button>
-                                        <button type="button" class="btn btn-custom">Удалить</button>
-                                        <button type="button" class="btn btn-custom">Удалить все</button>
+                                        <button type="button" class="btn btn-custom" @click="addConductorRow">Добавить</button>
+                                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedConductors, 'conductors', 'Проводники')">Изменить</button>
+                                        <button type="button" class="btn btn-custom" v-if="editingSection === 'conductors'" @click="finishInlineEdit">Готово</button>
+                                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('conductors', selectedConductors, 'Проводники')">Удалить</button>
+                                        <button type="button" class="btn btn-custom" @click="document.conductors = []">Удалить все</button>
                                         <button type="button" class="btn btn-custom">Копировать</button>
                                         <button type="button" class="btn btn-custom">Вставить</button>
                                     </div>
@@ -2546,14 +2734,12 @@ onMounted(async () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody class="table-group-divider">
-                                                    <tr>
-                                                        <td>
-                                                            <input type="checkbox" class="row-checkbox" />
-                                                        </td>
-                                                        <td></td>
-                                                        <td></td>
-                                                        <td></td>
-                                                        <td></td>
+                                                    <tr v-for="(conductor, idx) in conductorsRows" :key="`cond-${idx}`" :data-edit-row="`conductors-${idx}`" :class="{ 'editing-row': editingSection === 'conductors' && editingIndex === idx }">
+                                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedConductors" :disabled="editingSection === 'conductors' && editingIndex !== idx" /></td>
+                                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="conductor.fio" :disabled="!isRowEditable('conductors', idx)" /></td>
+                                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="conductor.passport_series" :disabled="!isRowEditable('conductors', idx)" /></td>
+                                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="conductor.passport_number" :disabled="!isRowEditable('conductors', idx)" /></td>
+                                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="conductor.mission_id" :disabled="!isRowEditable('conductors', idx)" /></td>
                                                     </tr>
                                                 </tbody>
                                             </table>
@@ -2564,7 +2750,7 @@ onMounted(async () => {
                                 <div class="row mb-1">
                                     <label class="col-auto col-form-label mb-0 label-custom">Количество проводников</label>
                                     <div class="col-auto">
-                                        <input type="text" class="form-control mt-0 custom-input" placeholder="" disabled />
+                                        <input type="text" class="form-control mt-0 custom-input" :value="totalConductorCount" disabled />
                                     </div>
                                 </div>
 
@@ -2619,10 +2805,11 @@ onMounted(async () => {
 
                                 <div class="row mb-1">
                                     <div class="col-auto">
-                                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#DobavitVagonOtmatky">Добавить</button>
-                                        <button type="button" class="btn btn-custom">Изменить</button>
-                                        <button type="button" class="btn btn-custom">Удалить</button>
-                                        <button type="button" class="btn btn-custom">Удалить все</button>
+                                        <button type="button" class="btn btn-custom" @click="addWagonMark">Добавить</button>
+                                        <button type="button" class="btn btn-custom" @click="startInlineEdit(selectedWagonMarks, 'wagon-marks', 'Вагонные отметки')">Изменить</button>
+                                        <button type="button" class="btn btn-custom" v-if="editingSection === 'wagon-marks'" @click="finishInlineEdit">Готово</button>
+                                        <button type="button" class="btn btn-custom" @click="removeSelectedByIndexes('wagon_marks', selectedWagonMarks, 'Вагонные отметки')">Удалить</button>
+                                        <button type="button" class="btn btn-custom" @click="document.wagon_marks = []">Удалить все</button>
                                         <button type="button" class="btn btn-custom">Копировать</button>
                                         <button type="button" class="btn btn-custom">Вставить</button>
                                     </div>
@@ -2641,13 +2828,11 @@ onMounted(async () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody class="table-group-divider">
-                                                    <tr>
-                                                        <td>
-                                                            <input type="checkbox" class="row-checkbox" />
-                                                        </td>
-                                                        <td></td>
-                                                        <td></td>
-                                                        <td></td>
+                                                    <tr v-for="(mark, idx) in wagonMarksRows" :key="`wm-${idx}`" :data-edit-row="`wagon-marks-${idx}`" :class="{ 'editing-row': editingSection === 'wagon-marks' && editingIndex === idx }">
+                                                        <td><input type="checkbox" class="row-checkbox" :value="idx" v-model="selectedWagonMarks" :disabled="editingSection === 'wagon-marks' && editingIndex !== idx" /></td>
+                                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="mark.type" :disabled="!isRowEditable('wagon-marks', idx)" /></td>
+                                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="mark.mark" :disabled="!isRowEditable('wagon-marks', idx)" /></td>
+                                                        <td><input type="text" class="form-control mt-0 custom-input" v-model="mark.note" :disabled="!isRowEditable('wagon-marks', idx)" /></td>
                                                     </tr>
                                                 </tbody>
                                             </table>
@@ -3129,16 +3314,7 @@ onMounted(async () => {
                 <!----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------->
 
                 <div class="row mb-1">
-                    <label class="col-auto col-form-label mb-0 label-custom">Способ определения массы</label>
-
-                    <div class="col-auto">
-                        <div class="input-group" style="width: 270px">
-                            <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                            <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#SposobOpredMass">
-                                <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                            </button>
-                        </div>
-                    </div>
+                    <simple-select title="Способ определения массы" :values="massDeterminationOptions" valueKey="id" name="name" v-model="document.mass_determination_method" />
                 </div>
 
                 <!--Найти Способ определения массы модальное окно -->
@@ -3209,12 +3385,12 @@ onMounted(async () => {
                 <div class="row mb-1">
                     <label class="col-auto col-form-label mb-0 label-custom">Фактические дата и время погрузки МСК</label>
                     <div class="col-auto">
-                        <input type="datetime-local" class="form-control mt-0 custom-input" style="width: 150px" />
+                        <input type="datetime-local" class="form-control mt-0 custom-input" style="width: 150px" v-model="document.loading_time_msk" />
                     </div>
 
                     <label class="col-auto col-form-label mb-0">Фактические дата и время погрузки МЕСТНЫЕ</label>
                     <div class="col-auto">
-                        <input type="datetime-local" class="form-control mt-0 disabled-input" style="width: 150px" disabled />
+                        <input type="datetime-local" class="form-control mt-0 custom-input" style="width: 150px" v-model="document.loading_time_local" />
                     </div>
                 </div>
 
@@ -3225,16 +3401,7 @@ onMounted(async () => {
                     </div>
 
                     <div class="row mb-1">
-                        <label class="col-auto col-form-label mb-0 label-custom">Груз закреплен и размещен согласно</label>
-
-                        <div class="col-auto">
-                            <div class="input-group" style="width: 270px">
-                                <input type="text" class="form-control custom-search" placeholder="Поиск" aria-label="Введите запрос" />
-                                <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#GruzZariRazmeh">
-                                    <font-awesome-icon icon="fa-solid fa-magnifying-glass" />
-                                </button>
-                            </div>
-                        </div>
+                        <simple-select title="Груз закреплен и размещен согласно" :values="cargoSecuredOptions" valueKey="id" name="name" v-model="document.cargo_secured_according_to" />
                     </div>
 
                     <!--Найти Груз закреплен и размещен согласно модальное окно -->
@@ -3293,7 +3460,7 @@ onMounted(async () => {
                     <div class="row mb-1">
                         <label class="col-auto col-form-label mb-0 label-custom">Технические условия размещения груза</label>
                         <div class="col-9">
-                            <input type="text" class="form-control mt-0 disabled-input" placeholder="" style="min-width: 100%; height: 200px" disabled="disabled" />
+                            <textarea class="form-control mt-0 custom-input" placeholder="" style="min-width: 100%; height: 200px" v-model="document.technical_conditions"></textarea>
                         </div>
 
                         <div class="col-auto">
@@ -3304,7 +3471,7 @@ onMounted(async () => {
                     <div class="row mb-1">
                         <label class="col-auto col-form-label mb-0 label-custom">Заполнение данных о погрузке закончено</label>
                         <div class="col-10">
-                            <input type="text" class="form-control mt-0 disabled-input" style="min-width: 100%" placeholder="" disabled="disabled" />
+                            <input type="checkbox" class="form-check-input custom-input" style="width: 20px; height: 20px" v-model="document.loading_finished" />
                         </div>
                     </div>
 
@@ -3483,5 +3650,9 @@ body {
     background-color: #2165b6;
     /* Цвет выделения строки */
     color: white;
+}
+
+.editing-row {
+    background-color: #fff8dc;
 }
 </style>

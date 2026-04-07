@@ -3,10 +3,10 @@ import HeaderComponent from "../components/HeaderComponent.vue";
 import StudentPerformanceComponent from "../components/StudentPerformanceComponent.vue";
 import { updateTitle } from "@/helpers/headerHelper";
 
-updateTitle("Тренажер ЭТРАН - Успеваемость");
+updateTitle("Тренажёр ОТРЭД - Успеваемость");
 </script>
 
 <template>
-  <HeaderComponent title="Тренажер ЭТРАН — Успеваемость" />
+  <HeaderComponent title="Тренажёр ОТРЭД — Успеваемость" />
   <StudentPerformanceComponent />
 </template>

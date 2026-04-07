@@ -4,6 +4,6 @@ import InvoiceMenuComponent from '../components/InvoiceMenuComponent.vue';
 </script>
 
 <template>
-    <HeaderComponent title="Тренажер ЭТРАН - Накладная"/>
+    <HeaderComponent title="Тренажёр ОТРЭД - Накладная"/>
     <InvoiceMenuComponent/>
 </template>

@@ -4,6 +4,6 @@ import CommercialActMenuComponent from "../components/CommercialActMenuComponent
 </script>
 
 <template>
-    <HeaderComponent title="Тренажер ЭТРАН - Коммерческий акт" />
+    <HeaderComponent title="Тренажёр ОТРЭД - Коммерческий акт" />
     <CommercialActMenuComponent />
 </template>
