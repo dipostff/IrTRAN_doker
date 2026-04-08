@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue';
 import axios from 'axios';
-import { getToken } from '@/helpers/keycloak';
+import { getToken, isAppAdmin } from '@/helpers/keycloak';
 
 const loading = ref(false);
 const error = ref('');
@@ -12,6 +12,24 @@ const profileLoading = ref(false);
 const profileError = ref('');
 const profileRequests = ref([]);
 const profileStatusFilter = ref('pending');
+const canCreateUsers = ref(false);
+
+const createLoading = ref(false);
+const createError = ref('');
+const createSuccess = ref('');
+const newUserEmail = ref('');
+const newUserPassword = ref('');
+const newUserFullName = ref('');
+const newUserAsStudent = ref(true);
+const newUserAsTeacher = ref(false);
+
+function onStudentRoleToggle() {
+  if (newUserAsStudent.value) newUserAsTeacher.value = false;
+}
+
+function onTeacherRoleToggle() {
+  if (newUserAsTeacher.value) newUserAsStudent.value = false;
+}
 
 const filteredUsers = computed(() => {
   const q = searchEmail.value.toLowerCase().trim();
@@ -47,6 +65,108 @@ async function loadUsers() {
     error.value = 'Не удалось загрузить список пользователей.';
   } finally {
     loading.value = false;
+  }
+}
+
+function parseFullName(fullName) {
+  const parts = String(fullName || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return { firstName: '', lastName: '' };
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
+  return {
+    lastName: parts[0],
+    firstName: parts[1],
+    middleName: parts.slice(2).join(' ')
+  };
+}
+
+async function createUser() {
+  if (!canCreateUsers.value) {
+    createError.value = 'Недостаточно прав для регистрации пользователя.';
+    return;
+  }
+  createError.value = '';
+  createSuccess.value = '';
+  const email = String(newUserEmail.value || '').trim().toLowerCase();
+  const password = String(newUserPassword.value || '');
+  const fullName = String(newUserFullName.value || '').trim();
+  const asTeacher = !!newUserAsTeacher.value;
+  const asStudent = !!newUserAsStudent.value;
+  if (!email || !password || !fullName) {
+    createError.value = 'Заполните email, пароль и ФИО.';
+    return;
+  }
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  if (!emailValid) {
+    createError.value = 'Укажите корректный email.';
+    return;
+  }
+  if (password.length < 6) {
+    createError.value = 'Пароль должен быть не короче 6 символов.';
+    return;
+  }
+  const names = parseFullName(fullName);
+  try {
+    createLoading.value = true;
+    const token = getToken();
+    const requestedRoles = asTeacher
+      ? ['student', 'teacher']
+      : (asStudent ? ['student'] : ['student']);
+    const createResp = await axios.post(
+      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/users`,
+      {
+        email,
+        username: email,
+        password,
+        fullName,
+        firstName: names.firstName || '',
+        lastName: names.lastName || '',
+        middleName: names.middleName || '',
+        roles: requestedRoles
+      },
+      {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : ''
+        }
+      }
+    );
+    if (asTeacher) {
+      try {
+        let createdId = createResp?.data?.id;
+        if (!createdId) {
+          const usersResp = await axios.get(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/users`,
+            { headers: { Authorization: token ? `Bearer ${token}` : '' } }
+          );
+          const created = (usersResp.data || []).find((u) => String(u.email || '').toLowerCase() === email);
+          createdId = created?.id;
+        }
+        if (createdId) {
+          await axios.post(
+            `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/users/${createdId}/roles`,
+            { add: ['student', 'teacher'], remove: [] },
+            { headers: { Authorization: token ? `Bearer ${token}` : '' } }
+          );
+        }
+      } catch (roleErr) {
+        console.warn('Teacher role assignment after registration failed:', roleErr);
+      }
+    }
+    createSuccess.value = 'Пользователь успешно зарегистрирован.';
+    newUserEmail.value = '';
+    newUserPassword.value = '';
+    newUserFullName.value = '';
+    newUserAsStudent.value = true;
+    newUserAsTeacher.value = false;
+    await loadUsers();
+  } catch (e) {
+    console.error('Error creating user:', e);
+    const msg = e?.response?.data?.message || e?.response?.data?.error || '';
+    createError.value = msg ? `Не удалось зарегистрировать пользователя: ${msg}` : 'Не удалось зарегистрировать пользователя.';
+  } finally {
+    createLoading.value = false;
   }
 }
 
@@ -145,6 +265,7 @@ async function rejectProfileRequest(row) {
 }
 
 onMounted(() => {
+  canCreateUsers.value = isAppAdmin();
   loadUsers();
   loadProfileRequests();
 });
@@ -153,6 +274,46 @@ onMounted(() => {
 <template>
   <div>
     <h4 class="mb-3">Управление пользователями</h4>
+    <div class="card mb-4">
+      <div class="card-body">
+        <h6 class="card-title mb-3">Регистрация пользователя (только админ)</h6>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Email</label>
+            <input v-model="newUserEmail" type="email" class="form-control" placeholder="user@example.com" :disabled="createLoading || !canCreateUsers" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Пароль</label>
+            <input v-model="newUserPassword" type="password" class="form-control" placeholder="Минимум 6 символов" :disabled="createLoading || !canCreateUsers" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">ФИО</label>
+            <input v-model="newUserFullName" type="text" class="form-control" placeholder="Иванов Иван Иванович" :disabled="createLoading || !canCreateUsers" />
+          </div>
+        </div>
+        <div class="form-check mt-3">
+          <input class="form-check-input" type="checkbox" id="newUserAsStudent" v-model="newUserAsStudent" @change="onStudentRoleToggle" :disabled="createLoading || !canCreateUsers" />
+          <label class="form-check-label" for="newUserAsStudent">
+            Сразу выдать роль студента
+          </label>
+        </div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" id="newUserAsTeacher" v-model="newUserAsTeacher" @change="onTeacherRoleToggle" :disabled="createLoading || !canCreateUsers" />
+          <label class="form-check-label" for="newUserAsTeacher">
+            Сразу выдать роль преподавателя
+          </label>
+        </div>
+        <div class="mt-3 d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-primary" @click="createUser" :disabled="createLoading || !canCreateUsers">
+            {{ createLoading ? 'Регистрация...' : 'Зарегистрировать' }}
+          </button>
+          <span v-if="!canCreateUsers" class="text-muted small">Доступно только роли app-admin</span>
+        </div>
+        <div v-if="createError" class="text-danger mt-2">{{ createError }}</div>
+        <div v-if="createSuccess" class="text-success mt-2">{{ createSuccess }}</div>
+      </div>
+    </div>
+
     <div class="row mb-3">
       <div class="col-md-6">
         <label class="form-label">Поиск пользователя по email / ФИО / логину</label>

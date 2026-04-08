@@ -17,7 +17,7 @@ function handleLogout() {
 <template>
     <div class="header">
         <router-link to="/menu">
-            <img src="@/assets/icons8-меню-50.png" alt="В меню" style="height: 20px; width: 20px" />
+            <font-awesome-icon icon="fa-solid fa-house" title="На главный экран" style="height: 20px; width: 20px; color: white" />
         </router-link>
         <router-link to="/menu" class="logo">
             <img src="@/assets/syspanellogo_2.png" alt="Логотип" height="30px" />

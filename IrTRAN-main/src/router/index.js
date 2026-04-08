@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { isAuthenticated, initKeycloak, isPureStudentAccount, isStudent } from "@/helpers/keycloak";
+import { isAuthenticated, initKeycloak, isPureStudentAccount, isStudent, isAppAdmin } from "@/helpers/keycloak";
 
 // Initialize Keycloak once; router guard can await this without re-triggering init per navigation.
 const keycloakReady = initKeycloak().catch((e) => {
@@ -337,6 +337,10 @@ router.beforeEach(async (to, from, next) => {
 
     // Check authentication for all other routes
     if (authenticated || isAuthenticated()) {
+        if (to.name === 'admin-panel' && !isAppAdmin()) {
+            next({ name: 'menu' });
+            return;
+        }
         if (to.name === 'student-performance' && !isStudent()) {
             next({ name: 'menu' });
             return;

@@ -4,6 +4,7 @@ const keycloakAuth = require('./../auth/keycloakAuth');
 const {
   listUsers,
   getUserRealmRoles,
+  createUserAccount,
   addRealmRolesToUser,
   removeRealmRolesFromUser
 } = require('./../auth/keycloakAdmin');
@@ -67,6 +68,73 @@ function registerAdminRoutes(app) {
         return res.status(500).json({
           error: 'admin_users_failed',
           message: 'Не удалось получить список пользователей из Keycloak.'
+        });
+      }
+    }
+  );
+
+  // Регистрация пользователя администратором
+  router.post(
+    '/api/admin/users',
+    keycloakAuth.verifyToken(),
+    keycloakAuth.requireRealmRole('app-admin'),
+    async (req, res) => {
+      try {
+        const body = req.body || {};
+        const email = String(body.email || '').trim().toLowerCase();
+        const username = String(body.username || email).trim().toLowerCase();
+        const password = String(body.password || '');
+        const firstName = String(body.firstName || '').trim();
+        const lastName = String(body.lastName || '').trim();
+        const roles = Array.isArray(body.roles) ? body.roles.filter(Boolean) : ['student'];
+
+        if (!email || !username || !password) {
+          return res.status(400).json({
+            error: 'bad_request',
+            message: 'Необходимо указать email, username и пароль.'
+          });
+        }
+        if (password.length < 6) {
+          return res.status(400).json({
+            error: 'bad_password',
+            message: 'Пароль должен быть не короче 6 символов.'
+          });
+        }
+
+        const created = await createUserAccount({
+          email,
+          username,
+          password,
+          firstName,
+          lastName
+        });
+
+        if (roles.length) {
+          await addRealmRolesToUser(created.id, roles);
+        }
+
+        const userRoles = await getUserRealmRoles(created.id);
+        return res.status(201).json({
+          id: created.id,
+          username: created.username,
+          email: created.email,
+          firstName: created.firstName,
+          lastName: created.lastName,
+          roles: userRoles
+        });
+      } catch (error) {
+        const status = error?.response?.status;
+        const errData = error?.response?.data;
+        console.error('Error creating admin user:', errData || error);
+        if (status === 409) {
+          return res.status(409).json({
+            error: 'already_exists',
+            message: 'Пользователь с таким email/логином уже существует.'
+          });
+        }
+        return res.status(500).json({
+          error: 'admin_create_user_failed',
+          message: 'Не удалось зарегистрировать пользователя.'
         });
       }
     }

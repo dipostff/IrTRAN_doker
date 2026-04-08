@@ -326,10 +326,59 @@ async function getUserRealmRoles(userId) {
   return roles;
 }
 
+/**
+ * Создать пользователя в Keycloak с паролем.
+ * Возвращает базовые данные созданного пользователя.
+ */
+async function createUserAccount(payload) {
+  const token = await getAdminAccessToken();
+  const body = {
+    username: payload.username,
+    email: payload.email,
+    firstName: payload.firstName || '',
+    lastName: payload.lastName || '',
+    enabled: true,
+    emailVerified: false,
+    credentials: [
+      {
+        type: 'password',
+        value: payload.password,
+        temporary: false
+      }
+    ]
+  };
+
+  await axios.post(
+    `${adminConfig.adminApiBaseUrl}/users`,
+    body,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+
+  // На создание Keycloak обычно отвечает 201 + Location с id пользователя.
+  const users = await axios.get(
+    `${adminConfig.adminApiBaseUrl}/users`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      params: { username: payload.username, max: 5 }
+    }
+  );
+  const created = (users.data || []).find((u) => u.username === payload.username || u.email === payload.email);
+  if (!created) {
+    throw new Error('user_created_but_not_found');
+  }
+  return created;
+}
+
 //-----------Экспортируемые модули-----------//
 module.exports = {
   addRealmRolesToUser,
   removeRealmRolesFromUser,
+  createUserAccount,
   listUsers,
   getUserRealmRoles,
   // groups (for teacher groups feature)
