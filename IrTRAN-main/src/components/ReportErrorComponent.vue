@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, onBeforeUnmount } from "vue";
 import { isAppAdmin } from "@/helpers/keycloak";
-import { getBugReports, getBugReport, createBugReport, updateBugReport } from "@/helpers/API";
+import { getBugReports, createBugReport, updateBugReport, getBugReportScreenshot } from "@/helpers/API";
 
 const activeTab = ref("report");
 const tickets = ref([]);
@@ -15,6 +15,10 @@ const form = ref({
 });
 const submitError = ref(null);
 const submitSuccess = ref(null);
+const screenshotFiles = ref([]);
+const screenshotDraftPreviews = ref([]);
+const isDragOver = ref(false);
+const screenshotHint = ref("");
 
 const moduleOptions = [
     "Заявка на грузоперевозку",
@@ -51,6 +55,8 @@ const adminDetailVisible = ref(false);
 const adminEdit = ref({ status: "", admin_response: "" });
 const adminSaving = ref(false);
 const adminSaveError = ref(null);
+const adminScreenshotPreviews = ref([]);
+const zoomedScreenshot = ref(null);
 
 async function loadTickets() {
     loading.value = true;
@@ -81,19 +87,110 @@ async function submitReport() {
         ? String(devtools_error).trim()
         : "ошибки в DevTools нет";
     try {
-        await createBugReport({
-            reporter_name: reporter_name.trim(),
-            module_name: module_name.trim(),
-            description: description ? description.trim() : null,
-            devtools_error: devtoolsText,
-        });
+        const payload = new FormData();
+        payload.append("reporter_name", reporter_name.trim());
+        payload.append("module_name", module_name.trim());
+        payload.append("description", description ? description.trim() : "");
+        payload.append("devtools_error", devtoolsText);
+        screenshotFiles.value.forEach((file) => payload.append("screenshots", file));
+        await createBugReport(payload);
         submitSuccess.value = "Сообщение об ошибке отправлено.";
         form.value = { reporter_name: "", module_name: "", description: "", devtools_error: "" };
+        screenshotDraftPreviews.value.forEach((i) => {
+            if (i.url) URL.revokeObjectURL(i.url);
+        });
+        screenshotDraftPreviews.value = [];
+        screenshotFiles.value = [];
+        screenshotHint.value = "";
         setTimeout(() => { submitSuccess.value = null; }, 4000);
         await loadTickets();
     } catch (e) {
         submitError.value = e.response?.data?.message || "Не удалось отправить.";
     }
+}
+
+function onScreenshotsChange(event) {
+    const inputFiles = Array.from(event?.target?.files || []);
+    appendScreenshotFiles(inputFiles);
+    if (event?.target) {
+        event.target.value = "";
+    }
+}
+
+function rebuildScreenshotPreviews() {
+    screenshotDraftPreviews.value.forEach((i) => {
+        if (i.url) URL.revokeObjectURL(i.url);
+    });
+    screenshotDraftPreviews.value = screenshotFiles.value.map((file, idx) => {
+        try {
+            return { key: `${file.name}-${idx}`, name: file.name, url: URL.createObjectURL(file) };
+        } catch (e) {
+            return { key: `${file.name}-${idx}`, name: file.name, url: "" };
+        }
+    });
+}
+
+function appendScreenshotFiles(files) {
+    const input = files || [];
+    const onlyImages = input.filter((f) => (f?.type || "").startsWith("image/"));
+    const nonImageSkipped = input.length - onlyImages.length;
+    if (!onlyImages.length && nonImageSkipped === 0) return;
+    const before = screenshotFiles.value.length;
+    const merged = [...screenshotFiles.value, ...onlyImages].slice(0, 5);
+    const added = merged.length - before;
+    const limitSkipped = Math.max(0, onlyImages.length - added);
+    const msgParts = [];
+    if (nonImageSkipped > 0) msgParts.push(`Пропущено не-изображений: ${nonImageSkipped}`);
+    if (limitSkipped > 0) msgParts.push(`Не добавлено из-за лимита 5: ${limitSkipped}`);
+    screenshotHint.value = msgParts.join(". ");
+    screenshotFiles.value = merged;
+    rebuildScreenshotPreviews();
+}
+
+function onDragOverScreenshots(event) {
+    event.preventDefault();
+    isDragOver.value = true;
+}
+
+function onDragLeaveScreenshots(event) {
+    event.preventDefault();
+    isDragOver.value = false;
+}
+
+function onDropScreenshots(event) {
+    event.preventDefault();
+    isDragOver.value = false;
+    const dropped = Array.from(event?.dataTransfer?.files || []);
+    appendScreenshotFiles(dropped);
+}
+
+function removeDraftScreenshot(index) {
+    const item = screenshotDraftPreviews.value[index];
+    if (item && item.url) {
+        URL.revokeObjectURL(item.url);
+    }
+    screenshotFiles.value.splice(index, 1);
+    screenshotDraftPreviews.value.splice(index, 1);
+    rebuildScreenshotPreviews();
+}
+
+async function loadAdminScreenshotPreviews(ticket) {
+    adminScreenshotPreviews.value.forEach((i) => {
+        if (i.url) URL.revokeObjectURL(i.url);
+    });
+    adminScreenshotPreviews.value = [];
+    const paths = Array.isArray(ticket?.screenshot_paths) ? ticket.screenshot_paths : [];
+    if (!paths.length) return;
+    const loaded = [];
+    for (const fileName of paths) {
+        try {
+            const blob = await getBugReportScreenshot(ticket.id, fileName);
+            loaded.push({ fileName, url: URL.createObjectURL(blob) });
+        } catch (e) {
+            loaded.push({ fileName, url: "" });
+        }
+    }
+    adminScreenshotPreviews.value = loaded;
 }
 
 function formatDate(d) {
@@ -107,11 +204,26 @@ function openAdminDetail(ticket) {
     adminEdit.value = { status: ticket.status, admin_response: ticket.admin_response || "" };
     adminSaveError.value = null;
     adminDetailVisible.value = true;
+    loadAdminScreenshotPreviews(ticket);
 }
 
 function closeAdminDetail() {
+    adminScreenshotPreviews.value.forEach((i) => {
+        if (i.url) URL.revokeObjectURL(i.url);
+    });
+    adminScreenshotPreviews.value = [];
+    zoomedScreenshot.value = null;
     adminDetailVisible.value = false;
     adminDetail.value = null;
+}
+
+function openScreenshotZoom(img) {
+    if (!img?.url) return;
+    zoomedScreenshot.value = img;
+}
+
+function closeScreenshotZoom() {
+    zoomedScreenshot.value = null;
 }
 
 async function saveAdminTicket() {
@@ -134,6 +246,15 @@ async function saveAdminTicket() {
 }
 
 onMounted(loadTickets);
+
+onBeforeUnmount(() => {
+    screenshotDraftPreviews.value.forEach((i) => {
+        if (i.url) URL.revokeObjectURL(i.url);
+    });
+    adminScreenshotPreviews.value.forEach((i) => {
+        if (i.url) URL.revokeObjectURL(i.url);
+    });
+});
 </script>
 
 <template>
@@ -187,6 +308,44 @@ onMounted(loadTickets);
                         <label class="form-label">Ошибка из DevTools <span class="text-danger">*</span></label>
                         <textarea v-model="form.devtools_error" class="form-control font-monospace small" rows="4" placeholder="Скопируйте текст ошибки из консоли браузера (F12). Если ошибки в DevTools нет — оставьте пустым или напишите: ошибки в DevTools нет"></textarea>
                         <small class="text-muted">Если ошибки в DevTools нет — оставьте пустым или введите: ошибки в DevTools нет</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Скриншоты (до 5 файлов, до 10 МБ каждый)</label>
+                        <div
+                            class="report-dropzone mb-2"
+                            :class="{ 'report-dropzone--active': isDragOver }"
+                            @dragover="onDragOverScreenshots"
+                            @dragleave="onDragLeaveScreenshots"
+                            @drop="onDropScreenshots"
+                        >
+                            Перетащите изображения сюда или выберите через кнопку ниже
+                        </div>
+                        <input type="file" class="form-control" accept="image/*" multiple @change="onScreenshotsChange" />
+                        <div v-if="screenshotFiles.length" class="mt-2">
+                            <div class="small text-muted mb-1">Выбрано: {{ screenshotFiles.length }}/5</div>
+                            <div class="d-flex flex-wrap gap-2">
+                                <div
+                                    v-for="(img, idx) in screenshotDraftPreviews"
+                                    :key="img.key"
+                                    class="report-image-item"
+                                >
+                                    <img
+                                        :src="img.url"
+                                        :alt="img.name"
+                                        class="report-image-preview border rounded"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-danger report-image-remove-btn"
+                                        title="Удалить скриншот"
+                                        @click="removeDraftScreenshot(idx)"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="screenshotHint" class="small text-warning mt-1">{{ screenshotHint }}</div>
                     </div>
                     <div v-if="submitError" class="alert alert-danger py-2">{{ submitError }}</div>
                     <div v-if="submitSuccess" class="alert alert-success py-2">{{ submitSuccess }}</div>
@@ -268,6 +427,23 @@ onMounted(loadTickets);
                             <dd class="col-sm-9">{{ adminDetail.description || '—' }}</dd>
                             <dt class="col-sm-3">Ошибка из DevTools</dt>
                             <dd class="col-sm-9"><pre class="mb-0 small bg-light p-2 rounded">{{ adminDetail.devtools_error || '—' }}</pre></dd>
+                            <dt class="col-sm-3">Скриншоты</dt>
+                            <dd class="col-sm-9">
+                                <div v-if="adminScreenshotPreviews.length" class="d-flex flex-wrap gap-2">
+                                    <template v-for="img in adminScreenshotPreviews" :key="img.fileName">
+                                        <img
+                                            v-if="img.url"
+                                            :src="img.url"
+                                            :alt="img.fileName"
+                                            class="report-image-preview border rounded report-image-clickable"
+                                            title="Нажмите, чтобы увеличить"
+                                            @click="openScreenshotZoom(img)"
+                                        />
+                                        <div v-else class="small text-muted">Не удалось загрузить: {{ img.fileName }}</div>
+                                    </template>
+                                </div>
+                                <span v-else>—</span>
+                            </dd>
                         </dl>
                         <hr />
                         <div class="mb-3">
@@ -287,6 +463,25 @@ onMounted(loadTickets);
                         <button type="button" class="btn btn-primary" :disabled="adminSaving" @click="saveAdminTicket">
                             {{ adminSaving ? 'Сохранение...' : 'Сохранить' }}
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div
+            v-if="zoomedScreenshot"
+            class="modal show d-block"
+            tabindex="-1"
+            style="background: rgba(0,0,0,0.75);"
+            @click.self="closeScreenshotZoom"
+        >
+            <div class="modal-dialog modal-xl modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Просмотр изображения</h5>
+                        <button type="button" class="btn-close" aria-label="Закрыть" @click="closeScreenshotZoom"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <img :src="zoomedScreenshot.url" :alt="zoomedScreenshot.fileName" class="report-image-zoomed" />
                     </div>
                 </div>
             </div>
@@ -316,5 +511,44 @@ onMounted(loadTickets);
 }
 .clickable:hover {
     background-color: #f0f4ff;
+}
+.report-image-preview {
+    width: 120px;
+    height: 90px;
+    object-fit: cover;
+}
+.report-image-item {
+    position: relative;
+}
+.report-image-remove-btn {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    line-height: 1;
+    border-radius: 999px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+}
+.report-image-clickable {
+    cursor: zoom-in;
+}
+.report-image-zoomed {
+    max-width: 100%;
+    max-height: 75vh;
+    object-fit: contain;
+}
+.report-dropzone {
+    border: 2px dashed #b8c7e8;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    color: #5d6a7f;
+    background: #fafcff;
+}
+.report-dropzone--active {
+    border-color: #4e87ff;
+    background: #eef4ff;
+    color: #2f5fbe;
 }
 </style>

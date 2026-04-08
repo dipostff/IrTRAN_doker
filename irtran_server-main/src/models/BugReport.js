@@ -32,6 +32,10 @@ const BugReport = sequelize.define('BugReport', {
     type: DataTypes.TEXT,
     allowNull: false
   },
+  screenshot_paths: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
   admin_response: {
     type: DataTypes.TEXT,
     allowNull: true

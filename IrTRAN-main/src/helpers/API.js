@@ -515,6 +515,13 @@ export async function updateBugReport(id, data) {
     return response.data;
 }
 
+export async function getBugReportScreenshot(id, fileName) {
+    const response = await apiClient.get(`${baseUrl}/api/bug-reports/${id}/screenshots/${encodeURIComponent(fileName)}`, {
+        responseType: "blob",
+    });
+    return response.data;
+}
+
 //--------------------------------------------------
 // Прогресс учебного сценария (тренажёр документов)
 //--------------------------------------------------
