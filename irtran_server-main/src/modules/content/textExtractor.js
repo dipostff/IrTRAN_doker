@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const WordExtractor = require('word-extractor');
+const XLSX = require('xlsx');
 let pdfParse;
 //-----------Подключаемые модули-----------//
 
@@ -23,6 +24,7 @@ function getPdfParse() {
  * Поддерживаются:
  *  - PDF (application/pdf)
  *  - Документы Word (.doc, .docx)
+ *  - Файлы Excel (.xls, .xlsx, .xlsm, .xlsb, .xltx, .xltm)
  */
 async function extractTextFromFile(filePath, mimeType) {
   try {
@@ -48,6 +50,32 @@ async function extractTextFromFile(filePath, mimeType) {
     ) {
       const doc = await wordExtractor.extract(filePath);
       return doc.getBody() || '';
+    }
+
+    // Excel (.xls/.xlsx/.xlsm/.xlsb/.xltx/.xltm)
+    if (
+      mimeType === 'application/vnd.ms-excel' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      mimeType === 'application/vnd.ms-excel.sheet.macroEnabled.12' ||
+      mimeType === 'application/vnd.ms-excel.sheet.binary.macroEnabled.12' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.template' ||
+      mimeType === 'application/vnd.ms-excel.template.macroEnabled.12' ||
+      ext === '.xls' ||
+      ext === '.xlsx' ||
+      ext === '.xlsm' ||
+      ext === '.xlsb' ||
+      ext === '.xltx' ||
+      ext === '.xltm'
+    ) {
+      const workbook = XLSX.readFile(filePath, { cellDates: false });
+      const parts = [];
+      for (const sheetName of workbook.SheetNames || []) {
+        const sheet = workbook.Sheets[sheetName];
+        if (!sheet) continue;
+        parts.push(`\n# ${sheetName}\n`);
+        parts.push(XLSX.utils.sheet_to_csv(sheet, { blankrows: false }));
+      }
+      return parts.join('\n').trim();
     }
 
     // Для остальных типов содержимое не индексируем

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { hasAnyRealmRole, isAppAdmin, isDictionaryAdmin, isStudent } from '@/helpers/keycloak';
 import AppID2 from '@/assets/IMAGES/AppID_2.png';
 import AppID1 from '@/assets/IMAGES/AppID_1.png';
@@ -91,6 +91,24 @@ const CATEGORIES = [
 ];
 
 const categories = computed(() => CATEGORIES.filter((c) => (typeof c.visible === 'function' ? c.visible() : true)));
+const totalModules = computed(() =>
+  categories.value.reduce((sum, c) => sum + countForCategory(c), 0)
+);
+const FAVORITE_ROUTES = [
+  '/transporation/menu',
+  '/invoice/menu',
+  '/act/menu',
+  '/reminder/menu',
+  '/filling-statement/menu',
+  '/cumulative-statement/menu',
+  '/test-mode',
+  '/reference'
+];
+const FAVORITES_STORAGE_KEY = 'irtran_menu_favorites_v1';
+const favoriteRoutes = ref([]);
+const favoritesReady = ref(false);
+const favoritesNotice = ref('');
+let favoritesNoticeTimer = null;
 
 const activeCategoryId = ref(categories.value[0]?.id || 'docs');
 const transitionName = ref('tiles-down');
@@ -109,6 +127,14 @@ const tiles = computed(() => {
   const cat = activeCategory.value;
   if (!cat) return [];
   return (cat.items || []).filter((it) => (typeof it.visible === 'function' ? it.visible() : true));
+});
+
+const favoriteTiles = computed(() => {
+  const all = categories.value.flatMap((c) =>
+    (c.items || []).filter((it) => (typeof it.visible === 'function' ? it.visible() : true))
+  );
+  const byTo = new Map(all.map((i) => [i.to, i]));
+  return favoriteRoutes.value.map((to) => byTo.get(to)).filter(Boolean).slice(0, 6);
 });
 
 function setActive(id) {
@@ -140,19 +166,169 @@ const CATEGORY_ICON = {
   service: ['fas', 'wrench'],
   admin: ['fas', 'user-shield']
 };
+
+const CATEGORY_ACCENT = {
+  docs: 'accent-docs',
+  study: 'accent-study',
+  tests: 'accent-tests',
+  service: 'accent-service',
+  admin: 'accent-admin'
+};
+
+const allVisibleTiles = computed(() =>
+  categories.value.flatMap((c) =>
+    (c.items || []).filter((it) => (typeof it.visible === 'function' ? it.visible() : true))
+  )
+);
+
+function readFavoritesFromStorage() {
+  try {
+    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function persistFavorites() {
+  try {
+    localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favoriteRoutes.value));
+  } catch (e) {
+    // ignore storage errors
+  }
+}
+
+function isFavorite(route) {
+  return favoriteRoutes.value.includes(route);
+}
+
+function toggleFavorite(route) {
+  if (!route) return;
+  const idx = favoriteRoutes.value.indexOf(route);
+  if (idx >= 0) {
+    favoriteRoutes.value.splice(idx, 1);
+  } else {
+    favoriteRoutes.value.unshift(route);
+    if (favoriteRoutes.value.length > 12) {
+      favoriteRoutes.value = favoriteRoutes.value.slice(0, 12);
+    }
+  }
+  persistFavorites();
+}
+
+function resetFavorites() {
+  favoriteRoutes.value = FAVORITE_ROUTES.slice(0, 6);
+  persistFavorites();
+  showFavoritesNotice('Избранные модули очищены и восстановлены по умолчанию.');
+}
+
+function clearFavorites() {
+  favoriteRoutes.value = [];
+  persistFavorites();
+}
+
+function showFavoritesNotice(message) {
+  favoritesNotice.value = message;
+  if (favoritesNoticeTimer) {
+    clearTimeout(favoritesNoticeTimer);
+  }
+  favoritesNoticeTimer = setTimeout(() => {
+    favoritesNotice.value = '';
+    favoritesNoticeTimer = null;
+  }, 2500);
+}
+
+onMounted(() => {
+  try {
+    const hasStored = localStorage.getItem(FAVORITES_STORAGE_KEY) !== null;
+    if (hasStored) {
+      const stored = readFavoritesFromStorage();
+      favoriteRoutes.value = Array.isArray(stored) ? stored : [];
+    } else {
+      favoriteRoutes.value = FAVORITE_ROUTES.slice(0, 6);
+      persistFavorites();
+    }
+  } catch (e) {
+    favoriteRoutes.value = FAVORITE_ROUTES.slice(0, 6);
+    persistFavorites();
+  }
+  favoritesReady.value = true;
+});
+
+onBeforeUnmount(() => {
+  if (favoritesNoticeTimer) {
+    clearTimeout(favoritesNoticeTimer);
+    favoritesNoticeTimer = null;
+  }
+});
+
+watch(
+  () => allVisibleTiles.value.map((t) => t.to),
+  (visibleRoutes) => {
+    const visibleSet = new Set(visibleRoutes);
+    const filtered = favoriteRoutes.value.filter((r) => visibleSet.has(r));
+    if (filtered.length !== favoriteRoutes.value.length) {
+      favoriteRoutes.value = filtered;
+      persistFavorites();
+    }
+  }
+);
 </script>
 
 <template>
   <div class="menu-shell">
-    <div class="menu-hero">
-      <div class="hero-card">
-        <div class="hero-badge">ОТРЭД</div>
-        <h2 class="hero-title">Тренажёр ОТРЭД по транспортной документации</h2>
-        <p class="hero-text">
-          Здесь вы можете отрабатывать оформление документов, проходить обучающие сценарии и закреплять теорию тестами.
-          Всё сделано так, чтобы тренироваться быстро и без «страха ошибки».
-        </p>
+    <div class="menu-topbar">
+      <div class="topbar-card">
+        <div class="topbar-item">
+          <div class="topbar-value">{{ totalModules }}</div>
+          <div class="topbar-label">доступных модулей</div>
+        </div>
+        <div class="topbar-sep" />
+        <div class="topbar-item">
+          <div class="topbar-value">{{ categories.length }}</div>
+          <div class="topbar-label">категорий</div>
+        </div>
+        <div class="topbar-sep" />
+        <div class="topbar-hint">Выберите категорию и откройте нужный модуль</div>
       </div>
+    </div>
+
+    <div class="menu-favorites">
+      <div class="favorites-head">
+        <div class="favorites-title">Избранные модули</div>
+        <div class="favorites-actions">
+          <div class="favorites-subtitle">Нажмите звезду на плитке, чтобы добавить или убрать модуль</div>
+          <div class="favorites-buttons">
+            <button type="button" class="favorites-reset" @click="clearFavorites">Очистить</button>
+            <button type="button" class="favorites-reset" @click="resetFavorites">Сбросить избранное</button>
+          </div>
+        </div>
+      </div>
+      <div v-if="favoriteTiles.length" class="favorites-grid">
+        <router-link
+          v-for="t in favoriteTiles"
+          :key="`fav-${t.to}`"
+          :to="t.to"
+          class="fav-tile"
+        >
+          <div class="tile-icon-wrap fav-icon-wrap">
+            <img
+              v-if="typeof t.icon === 'string'"
+              class="tile-icon"
+              :src="iconSrc(t.icon)"
+              :alt="t.title"
+              loading="lazy"
+            />
+          </div>
+          <div class="fav-title">{{ t.title }}</div>
+        </router-link>
+      </div>
+      <div v-else-if="favoritesReady" class="favorites-empty">
+        Список избранных модулей пуст. Отметьте звёздочкой нужные плитки ниже.
+      </div>
+      <div v-if="favoritesNotice" class="favorites-notice">{{ favoritesNotice }}</div>
     </div>
 
     <div class="menu-categories">
@@ -161,7 +337,7 @@ const CATEGORY_ICON = {
         :key="c.id"
         type="button"
         class="cat-pill"
-        :class="{ active: c.id === activeCategoryId }"
+        :class="[CATEGORY_ACCENT[c.id], { active: c.id === activeCategoryId }]"
         @click="setActive(c.id)"
       >
         <font-awesome-icon class="cat-icon" :icon="CATEGORY_ICON[c.id] || ['fas','layer-group']" />
@@ -177,8 +353,17 @@ const CATEGORY_ICON = {
           v-for="t in tiles"
           :key="t.to"
           :to="t.to"
-          class="tile"
+          class="tile tile-strong"
         >
+          <button
+            type="button"
+            class="fav-toggle"
+            :class="{ active: isFavorite(t.to) }"
+            :title="isFavorite(t.to) ? 'Убрать из избранного' : 'Добавить в избранное'"
+            @click.prevent.stop="toggleFavorite(t.to)"
+          >
+            <font-awesome-icon :icon="['fas', 'star']" />
+          </button>
           <div class="tile-icon-wrap">
             <img
               v-if="typeof t.icon === 'string'"
@@ -211,69 +396,53 @@ const CATEGORY_ICON = {
   --ring: rgba(125, 165, 240, 0.28);
   --shadow: 0 18px 50px rgba(16, 24, 40, 0.10);
 
-  padding: 78px 20px 40px; /* header fixed */
+  padding: 78px 20px 40px;
   min-height: calc(100vh - 50px);
   background:
     radial-gradient(900px 280px at 50% 0%, rgba(125, 165, 240, 0.22), transparent 70%),
     linear-gradient(180deg, var(--bg), #ffffff);
 }
 
-.menu-hero {
+.menu-topbar {
   display: flex;
   justify-content: center;
-  margin: 6px 0 18px;
+  margin: 6px 0 14px;
 }
 
-.hero-card {
+.topbar-card {
   width: min(980px, 100%);
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(16, 24, 40, 0.08);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  padding: 18px 18px 16px;
-  position: relative;
-  overflow: hidden;
-}
-
-.hero-card::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  background:
-    radial-gradient(600px 200px at 20% 0%, rgba(125, 165, 240, 0.26), transparent 60%),
-    radial-gradient(500px 180px at 80% 10%, rgba(79, 133, 235, 0.18), transparent 65%);
-  pointer-events: none;
-}
-
-.hero-badge {
-  position: relative;
-  display: inline-flex;
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.08);
+  padding: 12px 16px;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  color: #0b3aa8;
-  background: rgba(125, 165, 240, 0.18);
-  border: 1px solid rgba(125, 165, 240, 0.35);
-  border-radius: 999px;
-  padding: 6px 10px;
+  gap: 14px;
 }
-
-.hero-title {
-  position: relative;
-  margin: 10px 0 6px;
+.topbar-item {
+  min-width: 120px;
+}
+.topbar-value {
   font-size: 22px;
-  line-height: 1.2;
-  color: var(--ink);
+  font-weight: 800;
+  color: #2e5db8;
+  line-height: 1;
 }
-
-.hero-text {
-  position: relative;
-  margin: 0;
+.topbar-label {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.topbar-sep {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(16, 24, 40, 0.1);
+}
+.topbar-hint {
   color: var(--muted);
   font-size: 14px;
-  line-height: 1.45;
-  max-width: 78ch;
+  font-weight: 600;
 }
 
 .menu-categories {
@@ -283,6 +452,99 @@ const CATEGORY_ICON = {
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
+}
+.menu-favorites {
+  width: min(980px, 100%);
+  margin: 0 auto 14px;
+}
+.favorites-title {
+  color: #2b3b55;
+  font-size: 14px;
+  font-weight: 800;
+  margin: 0;
+}
+.favorites-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0 0 8px;
+}
+.favorites-subtitle {
+  color: #64748b;
+  font-size: 12px;
+}
+.favorites-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.favorites-buttons {
+  display: inline-flex;
+  gap: 8px;
+}
+.favorites-reset {
+  border: 1px solid rgba(16, 24, 40, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+}
+.favorites-reset:hover {
+  border-color: rgba(79, 133, 235, 0.45);
+  color: #1d4ed8;
+}
+.favorites-empty {
+  border: 1px dashed rgba(16, 24, 40, 0.2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #5b667a;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.8);
+}
+.favorites-notice {
+  margin-top: 8px;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 600;
+}
+.favorites-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.fav-tile {
+  text-decoration: none;
+  border: 1px solid rgba(16, 24, 40, 0.1);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(240,246,255,0.9));
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 8px 22px rgba(16, 24, 40, 0.08);
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  min-height: 74px;
+  overflow: hidden;
+}
+.fav-tile:hover {
+  transform: translateY(-1px);
+  border-color: rgba(125, 165, 240, 0.4);
+  box-shadow: 0 12px 30px rgba(79, 133, 235, 0.16);
+}
+.fav-icon-wrap {
+  width: 54px;
+  height: 54px;
+}
+.fav-title {
+  color: #243246;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.25;
 }
 
 .cat-pill {
@@ -320,6 +582,21 @@ const CATEGORY_ICON = {
 
 .cat-pill.active .cat-icon {
   color: rgba(79, 133, 235, 0.95);
+}
+.cat-pill.accent-docs.active {
+  background: rgba(96, 165, 250, 0.18);
+}
+.cat-pill.accent-study.active {
+  background: rgba(52, 211, 153, 0.18);
+}
+.cat-pill.accent-tests.active {
+  background: rgba(251, 191, 36, 0.2);
+}
+.cat-pill.accent-service.active {
+  background: rgba(167, 139, 250, 0.2);
+}
+.cat-pill.accent-admin.active {
+  background: rgba(248, 113, 113, 0.18);
 }
 
 .cat-label {
@@ -389,6 +666,35 @@ const CATEGORY_ICON = {
   box-shadow: 0 10px 26px rgba(16, 24, 40, 0.08);
   transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
   will-change: transform;
+  position: relative;
+}
+.tile-strong {
+  border-width: 1px;
+  min-height: 92px;
+  padding-top: 18px;
+}
+.fav-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 24, 40, 0.14);
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(100, 116, 139, 0.85);
+  display: grid;
+  place-items: center;
+  z-index: 2;
+}
+.fav-toggle:hover {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+.fav-toggle.active {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(255, 251, 235, 0.95);
 }
 
 .tile:hover {
@@ -421,7 +727,7 @@ const CATEGORY_ICON = {
 .tile-title {
   font-weight: 800;
   color: var(--ink);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.2;
 }
 
@@ -515,6 +821,9 @@ const CATEGORY_ICON = {
 }
 
 @media (max-width: 980px) {
+  .favorites-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .tiles-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -523,6 +832,34 @@ const CATEGORY_ICON = {
 @media (max-width: 560px) {
   .menu-shell {
     padding-top: 72px;
+  }
+  .topbar-card {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .topbar-sep {
+    display: none;
+  }
+  .topbar-hint {
+    width: 100%;
+    border-top: 1px solid rgba(16, 24, 40, 0.08);
+    padding-top: 8px;
+  }
+  .favorites-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .favorites-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .favorites-buttons {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .favorites-grid {
+    grid-template-columns: 1fr;
   }
   .tiles-grid {
     grid-template-columns: 1fr;

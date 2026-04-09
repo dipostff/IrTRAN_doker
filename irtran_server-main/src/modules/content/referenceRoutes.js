@@ -37,23 +37,37 @@ const upload = multer({
     const allowedMimeTypes = [
       'application/pdf',
       'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel.sheet.macroEnabled.12',
+      'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+      'application/vnd.ms-excel.template.macroEnabled.12'
     ];
 
     const ext = path.extname(file.originalname).toLowerCase();
     const isWordExt = ext === '.doc' || ext === '.docx';
     const isPdfExt = ext === '.pdf';
+    const isExcelExt =
+      ext === '.xls' ||
+      ext === '.xlsx' ||
+      ext === '.xlsm' ||
+      ext === '.xlsb' ||
+      ext === '.xltx' ||
+      ext === '.xltm';
 
     if (
       allowedMimeTypes.includes(file.mimetype) ||
       isWordExt ||
-      isPdfExt
+      isPdfExt ||
+      isExcelExt
     ) {
       cb(null, true);
     } else {
       cb(
         new Error(
-          'Недопустимый тип файла. Разрешены только PDF и документы Word.'
+          'Недопустимый тип файла. Разрешены PDF, документы Word и файлы Excel (.xls, .xlsx, .xlsm, .xlsb, .xltx, .xltm).'
         )
       );
     }
@@ -132,6 +146,128 @@ function registerReferenceRoutes(app) {
         return res.status(500).json({
           error: 'upload_failed',
           message: 'Не удалось загрузить справочный документ.'
+        });
+      }
+    }
+  );
+
+  // Обновление справочного документа (app-admin / dictionary-admin)
+  router.patch(
+    '/api/reference/:id',
+    keycloakAuth.verifyToken(),
+    keycloakAuth.requireAnyRealmRole(['app-admin', 'dictionary-admin']),
+    upload.single('file'),
+    async (req, res) => {
+      try {
+        const id = parseInt(req.params.id, 10);
+        if (Number.isNaN(id)) {
+          return res.status(400).json({
+            error: 'bad_id',
+            message: 'Некорректный идентификатор справочного документа.'
+          });
+        }
+
+        const doc = await ReferenceDocument.findByPk(id);
+        if (!doc) {
+          return res.status(404).json({
+            error: 'not_found',
+            message: 'Справочный документ не найден.'
+          });
+        }
+
+        const title = req.body && typeof req.body.title === 'string' ? req.body.title.trim() : '';
+        const file = req.file || null;
+
+        if (!title && !file) {
+          return res.status(400).json({
+            error: 'empty_update',
+            message: 'Передайте новое название и/или новый файл.'
+          });
+        }
+
+        if (title) {
+          doc.title = title;
+        }
+
+        if (file) {
+          const oldPath = doc.storage_path;
+          doc.filename = file.originalname;
+          doc.storage_path = file.path;
+          doc.mime_type = file.mimetype;
+          doc.size = file.size;
+          doc.text_content = await extractTextFromFile(file.path, file.mimetype);
+          if (oldPath && oldPath !== file.path && fs.existsSync(oldPath)) {
+            try {
+              fs.unlinkSync(oldPath);
+            } catch (e) {
+              console.warn('Cannot delete old reference file:', oldPath, e.message);
+            }
+          }
+        }
+
+        doc.updated_at = new Date();
+        await doc.save();
+        return res.json(doc);
+      } catch (error) {
+        console.error('Error updating reference document:', error);
+        if (
+          error instanceof Error &&
+          error.message &&
+          error.message.startsWith('Недопустимый тип файла')
+        ) {
+          return res.status(400).json({
+            error: 'invalid_file_type',
+            message: error.message
+          });
+        }
+        return res.status(500).json({
+          error: 'update_failed',
+          message: 'Не удалось обновить справочный документ.'
+        });
+      }
+    }
+  );
+
+  // Удаление справочного документа (app-admin / dictionary-admin)
+  router.delete(
+    '/api/reference/:id',
+    keycloakAuth.verifyToken(),
+    keycloakAuth.requireAnyRealmRole(['app-admin', 'dictionary-admin']),
+    async (req, res) => {
+      try {
+        const id = parseInt(req.params.id, 10);
+        if (Number.isNaN(id)) {
+          return res.status(400).json({
+            error: 'bad_id',
+            message: 'Некорректный идентификатор справочного документа.'
+          });
+        }
+
+        const doc = await ReferenceDocument.findByPk(id);
+        if (!doc) {
+          return res.status(404).json({
+            error: 'not_found',
+            message: 'Справочный документ не найден.'
+          });
+        }
+
+        const filePath = doc.storage_path;
+        await doc.destroy();
+
+        if (filePath && fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+          } catch (e) {
+            console.warn('Cannot delete reference file:', filePath, e.message);
+          }
+        }
+
+        return res.json({ ok: true });
+      } catch (error) {
+        console.error('Error deleting reference document:', error);
+        return res.status(500).json({
+          error: 'delete_failed',
+          message: 'Не удалось удалить справочный документ.'
         });
       }
     }
