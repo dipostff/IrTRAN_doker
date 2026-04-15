@@ -22,6 +22,19 @@ const StudentDocument = sequelize.define('StudentDocument', {
   deleted_at: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  is_exemplar: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  exemplar_title: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  reference_exemplar_id: {
+    type: DataTypes.INTEGER.UNSIGNED,
+    allowNull: true
   }
 }, {
   tableName: 'student_documents',

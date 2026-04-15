@@ -417,6 +417,16 @@ export async function saveSubmissionSchedule(object) {
     return response;
 }
 
+export async function saveSendNumber(object) {
+    let act = object.id ? "update" : "create";
+    let request = {
+        "act": act,
+        "object": object
+    };
+    let response = await sendRequest(baseUrl + "/send_numbers", request);
+    return response;
+}
+
 //--------------------------------------------------
 
 //------------------Удаление------------------------
@@ -489,6 +499,25 @@ export async function saveStudentDocument(documentType, payload) {
 
 export async function updateStudentDocument(id, payload) {
     const response = await apiClient.patch(`${baseUrl}/api/documents/student/${id}`, { payload });
+    return response.data;
+}
+
+/** Действия с метаданными student document (образец, ссылка на эталон) — см. action в теле. */
+export async function patchStudentDocument(id, body) {
+    const response = await apiClient.patch(`${baseUrl}/api/documents/student/${id}`, body);
+    return response.data;
+}
+
+export async function getDocumentExemplars(documentType) {
+    const q = documentType ? `?document_type=${encodeURIComponent(documentType)}` : "";
+    const response = await apiClient.get(`${baseUrl}/api/documents/exemplars${q}`);
+    return response.data;
+}
+
+/** @param {number} id — id записи student_documents @param {number|null|undefined} exemplarId — если null/undefined, используется reference_exemplar_id */
+export async function compareStudentDocument(id, exemplarId) {
+    const body = exemplarId != null && exemplarId !== "" ? { exemplarId } : {};
+    const response = await apiClient.post(`${baseUrl}/api/documents/student/${id}/compare`, body);
     return response.data;
 }
 

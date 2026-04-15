@@ -1,10 +1,12 @@
-import { getDocumentTypes, getMessageTypes, getSignsSending, getCountries, getLegalEntities, getOwnerships, getOwnersNonPublicRailway, getApprovalsWithOwner, getCargoGroups, getMethodsSubmission, getStations, getSendings, getCargos, getTransportPackageTypes, getSendTypes, getRollingStockTypes, getSpeedTypes, getDestinationIndications, getContracts, getPayers } from "@/helpers/API";
+import { getDocumentTypes, getMessageTypes, getSignsSending, getCountries, getLegalEntities, getOwnerships, getOwnersNonPublicRailway, getApprovalsWithOwner, getCargoGroups, getMethodsSubmission, getStations, getSendings, getCargos, getTransportPackageTypes, getSendTypes, getRollingStockTypes, getSpeedTypes, getDestinationIndications, getContracts, getPayers, getPayerTypes, getSubmissionSchedules, getSendNumbers } from "@/helpers/API";
 import { updateSubtitle } from "@/helpers/headerHelper";
 import { useListsStore } from "@/stores/main";
 import { getDiffDays } from "@/helpers/dateHelper";
 
 const listsStore = useListsStore();
 const date = new Date().toISOString().split("T")[0];
+let essentialListsPromise = null;
+let extendedListsPromise = null;
 
 export class Transporation {
     static getRequiredFields() {
@@ -60,8 +62,38 @@ export class Transporation {
         }
     }
 
-    static async loadLists() {
-        await Promise.all([
+    static hasEssentialLists() {
+        return (
+            Object.keys(listsStore.document_types || {}).length > 0 &&
+            Object.keys(listsStore.message_types || {}).length > 0 &&
+            Object.keys(listsStore.signs_sending || {}).length > 0 &&
+            Object.keys(listsStore.countries || {}).length > 0 &&
+            Object.keys(listsStore.legal_entities || {}).length > 0 &&
+            Object.keys(listsStore.cargo_groups || {}).length > 0 &&
+            Object.keys(listsStore.methods_submission || {}).length > 0 &&
+            Object.keys(listsStore.stations || {}).length > 0 &&
+            Object.keys(listsStore.cargos || {}).length > 0
+        );
+    }
+
+    static hasExtendedLists() {
+        return (
+            Object.keys(listsStore.destination_indications || {}).length > 0 &&
+            Object.keys(listsStore.contracts || {}).length > 0 &&
+            Object.keys(listsStore.payers || {}).length > 0 &&
+            Object.keys(listsStore.payer_types || {}).length > 0 &&
+            Object.keys(listsStore.submission_schedules || {}).length > 0 &&
+            Object.keys(listsStore.send_numbers || {}).length > 0
+        );
+    }
+
+    static async loadEssentialLists() {
+        if (Transporation.hasEssentialLists()) return;
+        if (essentialListsPromise) {
+            await essentialListsPromise;
+            return;
+        }
+        essentialListsPromise = Promise.all([
             getDocumentTypes(),
             getMessageTypes(),
             getSignsSending(),
@@ -79,10 +111,35 @@ export class Transporation {
             getSendTypes(),
             getRollingStockTypes(),
             getSpeedTypes(),
+        ]).finally(() => {
+            essentialListsPromise = null;
+        });
+        await essentialListsPromise;
+    }
+
+    static async loadExtendedLists() {
+        if (Transporation.hasExtendedLists()) return;
+        if (extendedListsPromise) {
+            await extendedListsPromise;
+            return;
+        }
+        extendedListsPromise = Promise.allSettled([
             getDestinationIndications(),
             getContracts(),
             getPayers(),
-        ]);
+            getPayerTypes(),
+            getSubmissionSchedules(),
+            getSendNumbers(),
+        ]).finally(() => {
+            extendedListsPromise = null;
+        });
+        await extendedListsPromise;
+    }
+
+    static async loadLists() {
+        await Transporation.loadEssentialLists();
+        // Не блокируем первичный рендер формы тяжёлыми справочниками.
+        void Transporation.loadExtendedLists();
     }
 
     /**

@@ -5,7 +5,8 @@ import {
     deleteTransporation,
     getTransportation,
     getCargoConstraints,
-    saveSubmissionSchedule
+    saveSubmissionSchedule,
+    saveSendNumber
 } from "@/helpers/API";
 import { updateTitle } from "@/helpers/headerHelper";
 import router from "@/router";
@@ -29,6 +30,8 @@ const selectedPayerIds = ref([]);
 const activeSendingId = ref(null);
 const sendingResetNonce = ref(0);
 const selectedSubmissionSendNumberId = ref(null);
+const isSubmissionModalOpen = ref(false);
+const isPayerModalOpen = ref(false);
 const submissionDraft = ref({
     id: null,
     submission_date: "",
@@ -125,6 +128,16 @@ function normalizeIdList(items) {
         .filter((id) => id != null);
 }
 
+function normalizeEntityId(value) {
+    if (value == null || value === "") return null;
+    if (typeof value === "object" && value.id != null) {
+        const n = Number(value.id);
+        return Number.isFinite(n) ? n : null;
+    }
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
 function normalizeDocument(data) {
     const base = Transporation.getDefaultDocument();
     const merged = Object.assign({}, base, data || {});
@@ -144,9 +157,29 @@ const submissionScheduleRows = computed(() => {
     return ids.map((id) => listsStore.submission_schedules?.[id]).filter(Boolean);
 });
 
+const submissionSendNumberOptions = computed(() => {
+    const fromDictionary = Object.values(listsStore.send_numbers || {}).map((row) => ({
+        id: Number(row.id),
+        name: row.name || `№${row.id}`,
+        source: "dictionary"
+    }));
+    if (fromDictionary.length > 0) return fromDictionary;
+    return sendingRows.value.map((row) => ({
+        id: Number(row.id),
+        name: row.id ? `Отправка №${row.id}` : "Отправка",
+        source: "sending"
+    }));
+});
+
 const payerRows = computed(() => {
     const ids = Array.isArray(document.value?.Payers) ? document.value.Payers : [];
     return ids.map((id) => listsStore.payers?.[id]).filter(Boolean);
+});
+
+const selectedPayerRow = computed(() => {
+    const id = normalizeEntityId(selectedPayerId.value);
+    if (!id) return null;
+    return listsStore.payers?.[id] || null;
 });
 
 const totalSubmissionWagons = computed(() =>
@@ -212,8 +245,8 @@ async function saveDocument() {
             Payers: (() => {
                 const ids = normalizeIdList(document.value.Payers);
                 if (ids.length > 0) return ids;
-                const selected = selectedPayerId.value != null ? Number(selectedPayerId.value) : NaN;
-                return Number.isFinite(selected) ? [selected] : [];
+                const selected = normalizeEntityId(selectedPayerId.value);
+                return selected ? [selected] : [];
             })()
         };
         let saveDoc = await saveTransporation(payload);
@@ -288,37 +321,164 @@ function removeSelectedSendings() {
 }
 
 function applySelectedPayer() {
-    const id = selectedPayerId.value != null ? Number(selectedPayerId.value) : NaN;
-    if (!Number.isFinite(id)) return;
+    const id = normalizeEntityId(selectedPayerId.value);
+    if (!id) {
+        saveError.value = "Выберите плательщика/экспедитора.";
+        return false;
+    }
+    if (!listsStore.payers?.[id]) {
+        saveError.value = "Выбранный плательщик не найден в справочнике.";
+        return false;
+    }
     if (!Array.isArray(document.value.Payers)) {
         document.value.Payers = [];
     }
-    if (!document.value.Payers.includes(id)) {
-        document.value.Payers.push(id);
+    if (document.value.Payers.some((x) => Number(x) === Number(id))) {
+        saveError.value = "Этот плательщик уже добавлен.";
+        return false;
     }
+    document.value.Payers.push(id);
+    selectedPayerId.value = id;
     selectedPayerIds.value = [];
+    return true;
 }
 
 function closeModalSafely(modalId) {
+    if (modalId === "staticGraficPodach") {
+        isSubmissionModalOpen.value = false;
+    }
+    if (modalId === "staticPlatelshic") {
+        isPayerModalOpen.value = false;
+    }
     try {
-        if (document.activeElement && typeof document.activeElement.blur === "function") {
-            document.activeElement.blur();
+        const dom = window.document;
+        if (dom.activeElement && typeof dom.activeElement.blur === "function") {
+            dom.activeElement.blur();
         }
-        const modalEl = document.getElementById(modalId);
+        const modalEl = dom.getElementById(modalId);
         if (!modalEl) return;
         const bs = window.bootstrap;
+        const jq = window.jQuery || window.$;
+
         if (bs?.Modal) {
             const instance = bs.Modal.getInstance(modalEl) || new bs.Modal(modalEl);
             instance.hide();
+            window.setTimeout(() => {
+                try {
+                    const still = bs.Modal.getInstance(modalEl);
+                    still?.dispose?.();
+                } catch (_) {
+                    // noop
+                }
+            }, 220);
         }
+        if (jq && typeof jq(modalEl).modal === "function") {
+            jq(modalEl).modal("hide");
+            try {
+                jq(modalEl).off("shown.bs.modal hidden.bs.modal");
+            } catch (_) {
+                // noop
+            }
+        }
+
+        // Финальный fallback: принудительно чистим состояние модалки.
+        const forceCleanup = () => {
+            modalEl.classList.remove("show", "in");
+            modalEl.style.display = "none";
+            modalEl.setAttribute("aria-hidden", "true");
+            modalEl.removeAttribute("aria-modal");
+            dom.body.classList.remove("modal-open");
+            dom.body.style.removeProperty("padding-right");
+            dom.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
+        };
+
+        // Запускаем сразу и повторно после тикa/анимации.
+        forceCleanup();
+        window.requestAnimationFrame(forceCleanup);
+        window.setTimeout(forceCleanup, 200);
     } catch (_) {
         // noop
     }
 }
 
+function openModalSafely(modalId) {
+    const dom = window.document;
+    const modalEl = dom.getElementById(modalId);
+    if (!modalEl) return;
+    const bs = window.bootstrap;
+    const jq = window.jQuery || window.$;
+    let opened = false;
+
+    // Стратегия 1: Bootstrap 5 API.
+    try {
+        if (bs?.Modal) {
+            const instance = bs.Modal.getInstance(modalEl) || new bs.Modal(modalEl);
+            instance.show();
+            opened = true;
+        }
+    } catch (_) {
+        opened = false;
+    }
+
+    // Стратегия 2: Bootstrap 4 jQuery API.
+    if (!opened) {
+        try {
+            if (jq && typeof jq(modalEl).modal === "function") {
+                jq(modalEl).modal("show");
+                opened = true;
+            }
+        } catch (_) {
+            opened = false;
+        }
+    }
+
+    // Стратегия 3: принудительный fallback (гарантия отображения).
+    if (!opened) {
+        try {
+            modalEl.classList.add("show", "in");
+            modalEl.style.display = "block";
+            modalEl.setAttribute("aria-modal", "true");
+            modalEl.setAttribute("role", "dialog");
+            modalEl.removeAttribute("aria-hidden");
+            dom.body.classList.add("modal-open");
+            if (!dom.querySelector(".modal-backdrop")) {
+                const backdrop = dom.createElement("div");
+                backdrop.className = "modal-backdrop fade show";
+                dom.body.appendChild(backdrop);
+            }
+        } catch (_) {
+            // noop
+        }
+    }
+}
+
+function openSubmissionScheduleModalForCreate() {
+    submissionDraft.value = { id: null, submission_date: "", weight: "", count_wagon: "" };
+    selectedSubmissionSendNumberId.value = null;
+    saveError.value = null;
+    isSubmissionModalOpen.value = true;
+}
+
+function openSubmissionScheduleModalForEdit() {
+    startEditSubmissionSchedule();
+    if (!saveError.value) isSubmissionModalOpen.value = true;
+}
+
+function openPayerModalForCreate() {
+    saveError.value = null;
+    selectedPayerId.value = null;
+    isPayerModalOpen.value = true;
+}
+
+function openPayerModalForEdit() {
+    startEditPayer();
+    if (!saveError.value) isPayerModalOpen.value = true;
+}
+
 function applySelectedPayerAndClose() {
-    applySelectedPayer();
-    if (!saveError.value) closeModalSafely("staticPlatelshic");
+    saveError.value = null;
+    const ok = applySelectedPayer();
+    if (ok) closeModalSafely("staticPlatelshic");
 }
 
 function startEditPayer() {
@@ -342,9 +502,30 @@ function removeSelectedPayers() {
 }
 
 async function applySubmissionSchedule() {
+    saveError.value = null;
+    const selectedSendNumberId = selectedSubmissionSendNumberId.value ? Number(selectedSubmissionSendNumberId.value) : null;
+    if (!selectedSendNumberId) {
+        saveError.value = "Выберите номер отправки для графика подачи.";
+        return;
+    }
+    const selectedOption = submissionSendNumberOptions.value.find((item) => Number(item.id) === selectedSendNumberId);
+    if (!selectedOption) {
+        saveError.value = "Выбранный номер отправки отсутствует в справочнике.";
+        return;
+    }
+    let sendNumberIdForSave = selectedSendNumberId;
+    if (selectedOption.source === "sending") {
+        const created = await saveSendNumber({ name: selectedOption.name });
+        if (!created || created.error || created.id == null) {
+            saveError.value = created?.message || "Не удалось создать номер отправки для графика.";
+            return;
+        }
+        sendNumberIdForSave = Number(created.id);
+        listsStore.send_numbers[sendNumberIdForSave] = created;
+    }
     const payload = {
         id: submissionDraft.value.id || undefined,
-        id_send_number: selectedSubmissionSendNumberId.value ? Number(selectedSubmissionSendNumberId.value) : null,
+        id_send_number: sendNumberIdForSave,
         submission_date: submissionDraft.value.submission_date || null,
         weight: submissionDraft.value.weight !== "" ? Number(submissionDraft.value.weight) : null,
         count_wagon: submissionDraft.value.count_wagon !== "" ? Number(submissionDraft.value.count_wagon) : null
@@ -426,7 +607,8 @@ async function fetchData() {
 
 onMounted(async () => {
     try {
-        await Transporation.loadLists();
+        await Transporation.loadEssentialLists();
+        void Transporation.loadExtendedLists();
     } catch (e) {
         console.error("Ошибка загрузки справочников:", e);
     }
@@ -705,8 +887,8 @@ watch(
                 <div class="row mb-1">
                     <div class="col-auto">
                         <button type="button" class="btn btn-custom">Рассчитать график подач</button>
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticGraficPodach">Добавить</button>
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticGraficPodach" @click="startEditSubmissionSchedule">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="openSubmissionScheduleModalForCreate">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openSubmissionScheduleModalForEdit">Изменить</button>
                         <button type="button" class="btn btn-custom" @click="removeSelectedSubmissionSchedules">Удалить</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
@@ -745,18 +927,18 @@ watch(
                 </div>
 
                 <!--Добавить График подач модальное окно -->
-                <div class="modal fade" id="staticGraficPodach" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticGraficPodachLabel" aria-hidden="true">
+                <div v-if="isSubmissionModalOpen" class="modal show d-block" id="staticGraficPodach" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticGraficPodachLabel" aria-hidden="false">
                     <div class="modal-dialog modal-dialog-centered modal-lg">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
                                 <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; font-weight: bold">График подачи</span>
-                                <button type="button" class="btn-close" aria-label="Закрыть" style="color: white" @click="closeModalSafely('staticGraficPodach')"></button>
+                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white" @click="closeModalSafely('staticGraficPodach')"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-1">
                                     <div class="col-auto">
                                         <button type="button" class="btn btn-custom" @click="applySubmissionScheduleAndClose">Применить</button>
-                                        <button type="button" class="btn btn-custom" @click="closeModalSafely('staticGraficPodach')">Отменить</button>
+                                        <button type="button" class="btn btn-custom" data-dismiss="modal" @click="closeModalSafely('staticGraficPodach')">Отменить</button>
                                     </div>
                                 </div>
 
@@ -765,10 +947,13 @@ watch(
                                     <div class="col-3">
                                         <select class="form-select mt-0 custom-input" v-model="selectedSubmissionSendNumberId">
                                             <option :value="null">Выберите элемент списка</option>
-                                            <option v-for="sendNumber in listsStore.send_numbers" :key="sendNumber.id" :value="sendNumber.id">
+                                            <option v-for="sendNumber in submissionSendNumberOptions" :key="sendNumber.id" :value="sendNumber.id">
                                                 {{ sendNumber.name || `№${sendNumber.id}` }}
                                             </option>
                                         </select>
+                                    </div>
+                                    <div v-if="submissionSendNumberOptions.length === 0" class="col-12 mt-2 text-danger small">
+                                        Нет доступных отправок для графика подачи.
                                     </div>
                                 </div>
 
@@ -796,6 +981,7 @@ watch(
                         </div>
                     </div>
                 </div>
+                <div v-if="isSubmissionModalOpen" class="modal-backdrop fade show"></div>
                 <!----------------------------- -->
 
                 <!-- ------------------------------------------------------- -->
@@ -807,8 +993,8 @@ watch(
 
                 <div class="row mb-1">
                     <div class="col-auto">
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticPlatelshic">Добавить</button>
-                        <button type="button" class="btn btn-custom" data-toggle="modal" data-target="#staticPlatelshic" @click="startEditPayer">Изменить</button>
+                        <button type="button" class="btn btn-custom" @click="openPayerModalForCreate">Добавить</button>
+                        <button type="button" class="btn btn-custom" @click="openPayerModalForEdit">Изменить</button>
                         <button type="button" class="btn btn-custom" @click="removeSelectedPayers">Удалить</button>
                         <button type="button" class="btn btn-custom">Копировать</button>
                         <button type="button" class="btn btn-custom">Вставить</button>
@@ -851,19 +1037,19 @@ watch(
                 </div>
 
                 <!--Добавить Плательщики/Экспедиторы модальное окно -->
-                <div class="modal fade" id="staticPlatelshic" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticPlatelshicLabel" aria-hidden="true">
+                <div v-if="isPayerModalOpen" class="modal show d-block" id="staticPlatelshic" data-backdrop="static" data-keyboard="false" tabindex="-1" aria-labelledby="staticPlatelshicLabel" aria-hidden="false">
                     <div class="modal-dialog modal-dialog-centered modal-lg" style="max-width: 70%">
                         <div class="modal-content">
                             <div class="modal-header" style="background-color: #7da5f0">
                                 <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; font-weight: bold">Плательщики/Экспедиторы</span>
                                 <span class="modal-title text-center" id="staticBackdropLabel" style="color: white; background-color: red; margin: 0 20%">Не указано, кто платит по заявке</span>
-                                <button type="button" class="btn-close" aria-label="Закрыть" style="color: white" @click="closeModalSafely('staticPlatelshic')"></button>
+                                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Закрыть" style="color: white" @click="closeModalSafely('staticPlatelshic')"></button>
                             </div>
                             <div class="modal-body">
                                 <div class="row mb-1">
                                     <div class="col-auto">
                                         <button type="button" class="btn btn-custom" @click="applySelectedPayerAndClose">Применить</button>
-                                        <button type="button" class="btn btn-custom" @click="closeModalSafely('staticPlatelshic')">Отменить</button>
+                                        <button type="button" class="btn btn-custom" data-dismiss="modal" @click="closeModalSafely('staticPlatelshic')">Отменить</button>
                                     </div>
                                 </div>
 
@@ -914,7 +1100,7 @@ watch(
                                         <input
                                             type="text"
                                             class="form-control mt-0 custom-input"
-                                            :value="listsStore.payers[selectedPayerId]?.OKPO || ''"
+                                            :value="selectedPayerRow?.OKPO || ''"
                                             disabled
                                         />
                                     </div>
@@ -926,7 +1112,7 @@ watch(
                                         <input
                                             type="text"
                                             class="form-control mt-0 custom-input"
-                                            :value="listsStore.payers[selectedPayerId]?.name || ''"
+                                            :value="selectedPayerRow?.name || ''"
                                             placeholder=""
                                             style="min-width: 100%"
                                             disabled
@@ -940,7 +1126,7 @@ watch(
                                         <input
                                             type="text"
                                             class="form-control mt-0 custom-input"
-                                            :value="listsStore.payers[selectedPayerId]?.addr || ''"
+                                            :value="selectedPayerRow?.addr || ''"
                                             placeholder=""
                                             style="min-width: 100%"
                                             disabled
@@ -955,7 +1141,7 @@ watch(
                                         <input
                                             type="text"
                                             class="form-control mt-0 custom-input"
-                                            :value="listsStore.payers[selectedPayerId]?.note || ''"
+                                            :value="selectedPayerRow?.note || ''"
                                             style="height: 100px; min-width: 100%"
                                             disabled
                                         />
@@ -965,6 +1151,7 @@ watch(
                         </div>
                     </div>
                 </div>
+                <div v-if="isPayerModalOpen" class="modal-backdrop fade show"></div>
                 <!----------------------------- -->
 
                 <!--Найти Плательщик/Экспедитор модальное окно -->

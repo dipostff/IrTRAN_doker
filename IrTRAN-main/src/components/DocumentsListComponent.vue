@@ -112,6 +112,7 @@ onMounted(load);
                     <tr>
                         <th>Тип документа</th>
                         <th>Краткое описание</th>
+                        <th>Образец</th>
                         <th>Дата создания</th>
                         <th>Подписан</th>
                         <th>Статус</th>
@@ -120,11 +121,15 @@ onMounted(load);
                 </thead>
                 <tbody>
                     <tr v-if="list.length === 0">
-                        <td colspan="6" class="text-center text-muted">Нет документов. Создавайте документы в разделах «Заявка на грузоперевозку», «Накладная», «Акты», «Памятка», «Ведомости» — они появятся здесь.</td>
+                        <td colspan="7" class="text-center text-muted">Нет документов. Создавайте документы в разделах «Заявка на грузоперевозку», «Накладная», «Акты», «Памятка», «Ведомости» — они появятся здесь.</td>
                     </tr>
                     <tr v-for="item in list" :key="item.source + '-' + item.id">
                         <td>{{ item.typeLabel }}</td>
                         <td>{{ item.summary }}</td>
+                        <td>
+                            <span v-if="item.source === 'student' && item.isExemplar" class="badge bg-info text-dark">Образец</span>
+                            <span v-else class="text-muted">—</span>
+                        </td>
                         <td>{{ formatDate(item.createdAt) }}</td>
                         <td>{{ item.signed ? 'Да' : 'Нет' }}</td>
                         <td>

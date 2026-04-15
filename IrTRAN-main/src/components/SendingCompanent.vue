@@ -22,6 +22,7 @@ export default {
             listsStore: {},
             mainStore: {},
             sending: {},
+            selectedDestinationIndicationId: null,
             cargoConstraints: {
                 hasCargoRestrictions: false,
                 cargoIds: []
@@ -35,6 +36,30 @@ export default {
             } else {
                 this.sending = Sending.getDefaultDocument();
             }
+            if (!Array.isArray(this.sending.DestinationIndications)) {
+                this.sending.DestinationIndications = [];
+            }
+            this.selectedDestinationIndicationId = null;
+        },
+        addDestinationIndication() {
+            const id = Number(this.selectedDestinationIndicationId);
+            if (!Number.isFinite(id)) return;
+            const selected = this.listsStore.destination_indications?.[id];
+            if (!selected) return;
+            if (!Array.isArray(this.sending.DestinationIndications)) {
+                this.sending.DestinationIndications = [];
+            }
+            const exists = this.sending.DestinationIndications.some((item) => Number(item?.id) === id);
+            if (!exists) {
+                this.sending.DestinationIndications.push(selected);
+            }
+        },
+        removeDestinationIndication() {
+            const id = Number(this.selectedDestinationIndicationId);
+            if (!Number.isFinite(id)) return;
+            this.sending.DestinationIndications = (this.sending.DestinationIndications || []).filter(
+                (item) => Number(item?.id) !== id
+            );
         },
         async fetchCargoConstraints() {
             try {
@@ -265,25 +290,27 @@ export default {
                         <label class="col-auto col-form-label mb-0" style="width: auto; font-weight: bold">Признак назначения</label>
                     </div>
 
-                    <div class="row mb-1" style="opacity: 0.5;">
+                    <div class="row mb-1">
                         <div class="col-auto">
                             <simple-button data-toggle="modal" data-target="#DobavitPriznak" title="Добавить" />
-                            <simple-button title="Удалить" />
+                            <simple-button title="Удалить" @click="removeDestinationIndication" />
                         </div>
                     </div>
 
-                    <div class="row mb-1" style="opacity: 0.5;">
+                    <div class="row mb-1">
                         <div class="col-12">
                             <div class="table-responsive" style="border: #c1c1c1 solid 1px; padding-bottom: 50px">
                                 <table class="table table-hover table-bordered border-white">
                                     <thead style="background-color: #7da5f0; color: white">
                                         <tr>
+                                            <th></th>
                                             <th>№</th>
                                             <th>Признак назначения</th>
                                         </tr>
                                     </thead>
                                     <tbody class="table-group-divider">
                                         <tr v-for="(item, key) in sending.DestinationIndications" :key="key">
+                                            <td><input type="radio" class="form-check-input" :value="item.id" v-model="selectedDestinationIndicationId" /></td>
                                             <td>{{ item.code }}</td>
                                             <td>{{ item.name }}</td>
                                         </tr>
@@ -294,7 +321,7 @@ export default {
                     </div>
                     <!--------------------------------------------------->
 
-                    <div class="row mb-1" style="opacity: 0.5;">
+                    <div class="row mb-1">
                         <select-with-search title="Договор на особых условиях" :fixWidth=false :values="listsStore.contracts" valueKey="id" name="name" v-model="sending.id_contract_special_terms" modalName="SendingContracts" :fields="{ Код: 'code', Наименование: 'name', 'Краткое': 'short_name' }" />
                     </div>
                 </div>
@@ -330,6 +357,7 @@ export default {
                         <table class="table table-hover table-bordered border-white">
                             <thead style="background-color: #7da5f0; color: white">
                                 <tr>
+                                    <th></th>
                                     <th>Код</th>
                                     <th>Наименование</th>
                                     <th>Примечание</th>
@@ -337,6 +365,7 @@ export default {
                             </thead>
                             <tbody class="table-group-divider">
                                 <tr v-for="(item, key) in listsStore.destination_indications" :key="key">
+                                    <td><input type="radio" class="form-check-input" :value="item.id" v-model="selectedDestinationIndicationId" /></td>
                                     <td>{{ item.code }}</td>
                                     <td>{{ item.name }}</td>
                                     <td>{{ item.note }}</td>
@@ -346,7 +375,7 @@ export default {
                     </div>
 
                     <div class="row justify-content-md-end">
-                        <button type="button" class="btn btn-custom" style="width: 70px; margin: 10px">Да</button>
+                        <button type="button" class="btn btn-custom" style="width: 70px; margin: 10px" data-dismiss="modal" @click="addDestinationIndication">Да</button>
                         <button type="button" class="btn btn-custom" data-dismiss="modal" style="width: 70px; margin: 10px">Нет</button>
                     </div>
                 </div>

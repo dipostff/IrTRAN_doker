@@ -3,7 +3,9 @@ const express = require('express');
 const keycloakAuth = require('../auth/keycloakAuth');
 const RequestTransportation = require('../../models/RequestTransportation');
 const StudentDocument = require('../../models/StudentDocument');
-const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+const { buildSimpleFieldsPdf, buildStudentDocumentPdf } = require('./documentPdfExport');
+const { loadPdfDictionaryMaps } = require('./pdfDictionaryMaps');
+const { comparePayloads, formatDiffValue } = require('./documentPayloadDiff');
 //-----------Подключаемые модули-----------//
 
 const DOCUMENT_TYPES = {
@@ -25,16 +27,6 @@ const DOCUMENT_TYPE_LABELS = {
   filling_statement: 'Ведомость подачи и уборки',
   cumulative_statement: 'Накопительная ведомость'
 };
-
-function toWinAnsiSafeText(value) {
-  // StandardFonts.Helvetica в pdf-lib поддерживает WinAnsi и падает на кириллице.
-  // Чтобы не ронять скачивание PDF, заменяем неподдерживаемые символы.
-  return String(value ?? '')
-    .replace(/\r?\n/g, ' ')
-    .replace(/[^\x20-\x7E]/g, '?')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 function getUserId(req) {
   const user = req.user || {};
@@ -99,36 +91,15 @@ async function listDocuments(userId, options = {}) {
       createdAt: row.created_at,
       deletedAt: row.deleted_at,
       signed: !!payload.signed,
-      summary: `${DOCUMENT_TYPE_LABELS[row.document_type] || row.document_type} № ${docId}`
+      summary: `${DOCUMENT_TYPE_LABELS[row.document_type] || row.document_type} № ${docId}`,
+      isExemplar: !!row.is_exemplar,
+      exemplarTitle: row.exemplar_title || null,
+      referenceExemplarId: row.reference_exemplar_id != null ? row.reference_exemplar_id : null
     });
   });
 
   list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   return list;
-}
-
-/**
- * Генерация PDF из данных документа (простой текстовый отчёт).
- */
-async function buildPdfFromData(title, fields) {
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595, 842]);
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const { height } = page.getSize();
-  let y = height - 50;
-
-  page.drawText(toWinAnsiSafeText(title), { x: 50, y, size: 16, font, color: rgb(0, 0, 0) });
-  y -= 28;
-
-  const lineHeight = 14;
-  for (const [label, value] of Object.entries(fields)) {
-    const text = toWinAnsiSafeText(`${String(label)}: ${value != null ? String(value) : '-'}`).slice(0, 80);
-    page.drawText(text, { x: 50, y, size: 10, font, color: rgb(0, 0, 0) });
-    y -= lineHeight;
-  }
-
-  const pdfBytes = await pdfDoc.save();
-  return Buffer.from(pdfBytes);
 }
 
 function registerDocumentsRoutes(app) {
@@ -251,6 +222,11 @@ function registerDocumentsRoutes(app) {
       if (!row) return res.status(404).json({ error: 'not_found' });
       if (row.user_id !== userId) return res.status(403).json({ error: 'forbidden' });
       const { action, payload } = req.body || {};
+
+      const isTeacherOrAdmin =
+        keycloakAuth.hasRealmRole(req.user, 'teacher') ||
+        keycloakAuth.hasRealmRole(req.user, 'app-admin');
+
       if (action === 'delete') {
         row.deleted_at = new Date();
         await row.save();
@@ -261,6 +237,57 @@ function registerDocumentsRoutes(app) {
         await row.save();
         return res.json({ ok: true, restored: true });
       }
+      if (action === 'set_exemplar') {
+        if (!isTeacherOrAdmin) {
+          return res.status(403).json({
+            error: 'forbidden',
+            message: 'Помечать образец могут только преподаватель или администратор.'
+          });
+        }
+        row.is_exemplar = true;
+        const t = req.body.exemplar_title;
+        row.exemplar_title = t != null && String(t).trim() ? String(t).trim().slice(0, 255) : null;
+        await row.save();
+        return res.json(row);
+      }
+      if (action === 'unset_exemplar') {
+        if (!isTeacherOrAdmin) {
+          return res.status(403).json({
+            error: 'forbidden',
+            message: 'Снимать метку образца могут только преподаватель или администратор.'
+          });
+        }
+        row.is_exemplar = false;
+        row.exemplar_title = null;
+        await row.save();
+        return res.json(row);
+      }
+      if (action === 'set_reference_exemplar') {
+        const rawEx = req.body.exemplar_id;
+        if (rawEx == null || rawEx === '') {
+          row.reference_exemplar_id = null;
+          await row.save();
+          return res.json(row);
+        }
+        const exId = parseInt(rawEx, 10);
+        if (isNaN(exId)) return res.status(400).json({ error: 'invalid_exemplar_id' });
+        const ex = await StudentDocument.findByPk(exId);
+        if (!ex || ex.deleted_at) {
+          return res.status(404).json({ error: 'exemplar_not_found', message: 'Образец не найден.' });
+        }
+        if (!ex.is_exemplar) {
+          return res.status(400).json({ error: 'not_an_exemplar', message: 'Указанная запись не помечена как образец.' });
+        }
+        if (ex.document_type !== row.document_type) {
+          return res.status(400).json({
+            error: 'document_type_mismatch',
+            message: 'Тип документа образца не совпадает с вашим документом.'
+          });
+        }
+        row.reference_exemplar_id = exId;
+        await row.save();
+        return res.json(row);
+      }
       if (payload !== undefined) {
         row.payload = payload;
         await row.save();
@@ -269,6 +296,94 @@ function registerDocumentsRoutes(app) {
       return res.status(400).json({ error: 'invalid_request' });
     } catch (err) {
       console.error('PATCH /api/documents/student/:id', err);
+      return res.status(500).json({ error: 'server_error', message: err.message });
+    }
+  });
+
+  /** Список образцов преподавателей (для сравнения). */
+  router.get('/api/documents/exemplars', keycloakAuth.verifyToken(), ensureAuth, async (req, res) => {
+    try {
+      const documentType = req.query.document_type || req.query.type || null;
+      const where = { is_exemplar: true, deleted_at: null };
+      if (documentType) where.document_type = String(documentType);
+      const rows = await StudentDocument.findAll({
+        where,
+        attributes: ['id', 'document_type', 'exemplar_title', 'created_at'],
+        order: [['created_at', 'DESC']],
+        raw: true
+      });
+      return res.json({
+        items: rows.map((r) => ({
+          id: r.id,
+          document_type: r.document_type,
+          exemplar_title: r.exemplar_title,
+          created_at: r.created_at
+        }))
+      });
+    } catch (err) {
+      console.error('GET /api/documents/exemplars', err);
+      return res.status(500).json({ error: 'server_error', message: err.message });
+    }
+  });
+
+  /** Сравнение заполнения с образцом. */
+  router.post('/api/documents/student/:id/compare', keycloakAuth.verifyToken(), ensureAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: 'invalid_id' });
+      const row = await StudentDocument.findByPk(id);
+      if (!row || row.deleted_at) return res.status(404).json({ error: 'not_found' });
+      if (row.user_id !== userId) return res.status(403).json({ error: 'forbidden' });
+
+      let exemplarId = req.body?.exemplarId;
+      if (exemplarId === undefined || exemplarId === null || exemplarId === '') {
+        exemplarId = row.reference_exemplar_id;
+      } else {
+        exemplarId = parseInt(exemplarId, 10);
+      }
+      if (exemplarId == null || Number.isNaN(exemplarId)) {
+        return res.status(400).json({
+          error: 'exemplar_required',
+          message: 'Укажите номер образца (exemplarId) в теле запроса или сохраните образец по умолчанию для документа.'
+        });
+      }
+
+      const ex = await StudentDocument.findByPk(exemplarId);
+      if (!ex || ex.deleted_at) {
+        return res.status(404).json({ error: 'exemplar_not_found', message: 'Образец не найден.' });
+      }
+      if (!ex.is_exemplar) {
+        return res.status(400).json({ error: 'not_an_exemplar', message: 'Указанная запись не является образцом.' });
+      }
+      if (ex.document_type !== row.document_type) {
+        return res.status(400).json({
+          error: 'document_type_mismatch',
+          message: 'Тип документа образца не совпадает с документом.'
+        });
+      }
+
+      const result = comparePayloads(row.payload || {}, ex.payload || {});
+      const differences = result.differences.map((d) => ({
+        path: d.path,
+        label: d.label,
+        kind: d.kind,
+        expected: d.expected,
+        actual: d.actual,
+        expectedFormatted: formatDiffValue(d.expected),
+        actualFormatted: formatDiffValue(d.actual)
+      }));
+
+      return res.json({
+        documentType: row.document_type,
+        exemplarId,
+        exemplarTitle: ex.exemplar_title,
+        match: result.match,
+        summary: result.summary,
+        differences
+      });
+    } catch (err) {
+      console.error('POST /api/documents/student/:id/compare', err);
       return res.status(500).json({ error: 'server_error', message: err.message });
     }
   });
@@ -289,7 +404,7 @@ function registerDocumentsRoutes(app) {
         'Период перевозки по': row.transportation_date_to,
         'Статус': row.document_status
       };
-      const pdfBuffer = await buildPdfFromData(title, fields);
+      const pdfBuffer = await buildSimpleFieldsPdf(title, fields);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="zayavka-${row.id}.pdf"`);
       return res.send(pdfBuffer);
@@ -309,17 +424,16 @@ function registerDocumentsRoutes(app) {
       if (row.user_id !== userId) return res.status(403).json({ error: 'forbidden' });
       const payload = row.payload || {};
       const typeLabel = DOCUMENT_TYPE_LABELS[row.document_type] || row.document_type;
-      const title = `${typeLabel} № ${payload.id || row.id}`;
-      const fields = {
-        'Тип документа': typeLabel,
-        'ID записи': row.id,
-        'Подписан': payload.signed ? 'Да' : 'Нет',
-        'Дата создания': row.created_at
-      };
-      Object.keys(payload).filter(k => !['id', 'signed', 'createdAt'].includes(k)).slice(0, 15).forEach((k) => {
-        fields[k] = payload[k];
-      });
-      const pdfBuffer = await buildPdfFromData(title, fields);
+      let dictionaryMaps = null;
+      try {
+        dictionaryMaps = await loadPdfDictionaryMaps(payload);
+      } catch (dictErr) {
+        console.error('GET /api/documents/student/:id/pdf dictionary maps', dictErr);
+      }
+      const pdfBuffer = await buildStudentDocumentPdf(row.document_type, typeLabel, payload, {
+        rowId: row.id,
+        createdAt: row.created_at,
+      }, { dictionaryMaps });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="document-${row.id}.pdf"`);
       return res.send(pdfBuffer);
