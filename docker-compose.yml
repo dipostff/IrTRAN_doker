@@ -44,6 +44,12 @@ services:
       # Импорт реалма при старте: все *.json из keycloak-realm/ подхватываются Keycloak
       - ./keycloak-realm:/opt/keycloak/data/import
     command: start-dev --import-realm
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,7 +109,7 @@ services:
       mysql:
         condition: service_healthy
       keycloak:
-        condition: service_started
+        condition: service_healthy
     networks:
       - app-network
 
@@ -131,9 +137,12 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - frontend
-      - backend
-      - keycloak
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
     networks:
       - app-network
 

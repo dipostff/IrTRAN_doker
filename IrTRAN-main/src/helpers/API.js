@@ -2,7 +2,11 @@ import axios from "axios";
 import { useListsStore } from "@/stores/main";
 import { getToken, updateToken } from "./keycloak";
 
-const baseUrl = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/$/, "");
+const runtimeOrigin =
+    typeof window !== "undefined" && window.location && window.location.origin
+        ? window.location.origin
+        : "";
+const baseUrl = (import.meta.env.VITE_API_URL || runtimeOrigin).replace(/\/$/, "");
 const host = baseUrl.replace(/^https?:\/\//, ""); // имя или ip хоста api для sendRequest
 const listsStore = useListsStore();
 
@@ -519,6 +523,60 @@ export async function compareStudentDocument(id, exemplarId) {
     const body = exemplarId != null && exemplarId !== "" ? { exemplarId } : {};
     const response = await apiClient.post(`${baseUrl}/api/documents/student/${id}/compare`, body);
     return response.data;
+}
+
+// Модуль «Проверка документов»
+export async function submitDocumentForReview(source, documentId) {
+  const response = await apiClient.post(`${baseUrl}/api/document-review/submit`, { source, documentId });
+  return response.data;
+}
+
+export async function getMyDocumentReviews() {
+  const response = await apiClient.get(`${baseUrl}/api/document-review/my`);
+  return response.data;
+}
+
+export async function getTeacherDocumentReviewSubmissions(params = {}) {
+  const query = new URLSearchParams();
+  if (params.status) query.set('status', params.status);
+  const url = `${baseUrl}/api/document-review/teacher/submissions${query.toString() ? `?${query.toString()}` : ''}`;
+  const response = await apiClient.get(url);
+  return response.data;
+}
+
+export async function getTeacherDocumentReviewSubmission(id) {
+  const response = await apiClient.get(`${baseUrl}/api/document-review/teacher/submissions/${id}`);
+  return response.data;
+}
+
+export async function getTeacherDocumentReviewAuditTrail(id) {
+  const response = await apiClient.get(`${baseUrl}/api/document-review/teacher/submissions/${id}/audit-trail`);
+  return response.data;
+}
+
+export async function getTeacherDocumentReviewMetrics() {
+  const response = await apiClient.get(`${baseUrl}/api/document-review/teacher/metrics`);
+  return response.data;
+}
+
+export async function analyzeDocumentReviewSubmission(id) {
+  const response = await apiClient.post(`${baseUrl}/api/document-review/teacher/submissions/${id}/analyze`);
+  return response.data;
+}
+
+export async function finalizeDocumentReviewSubmission(id, payload) {
+  const response = await apiClient.patch(`${baseUrl}/api/document-review/teacher/submissions/${id}/finalize`, payload);
+  return response.data;
+}
+
+export async function getDocumentReviewTemplates() {
+  const response = await apiClient.get(`${baseUrl}/api/document-review/templates`);
+  return response.data;
+}
+
+export async function saveDocumentReviewTemplate(documentType, payload) {
+  const response = await apiClient.put(`${baseUrl}/api/document-review/templates/${encodeURIComponent(documentType)}`, { payload });
+  return response.data;
 }
 
 //--------------------------------------------------

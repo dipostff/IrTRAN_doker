@@ -73,6 +73,13 @@ const CATEGORIES = [
         visible: () => isTeacherOrAdmin.value
       },
       {
+        to: '/document-review',
+        title: 'Проверка документов',
+        subtitle: 'ручная / алгоритмическая',
+        icon: 'https://cdn-icons-png.flaticon.com/512/3193/3193015.png',
+        visible: () => isTeacherOrAdmin.value
+      },
+      {
         to: '/dictionary-module',
         title: 'Заполнение справочников',
         subtitle: 'импорт / шаблоны',
